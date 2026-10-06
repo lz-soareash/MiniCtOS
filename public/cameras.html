@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="dark">
+<title>ctOS — Mural de Câmeras</title>
+<link rel="stylesheet" href="site.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%2305090f'/%3E%3Ccircle cx='8' cy='8' r='4' fill='none' stroke='%233fd8ff' stroke-width='2'/%3E%3C/svg%3E">
+<style>
+  .cam-controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+  .cam-controls button { width: auto; margin: 0; display: inline-block; }
+  #detail { display: none; }
+  #detail.show { display: block; }
+  .filters { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+  .filters button { width: auto; margin: 0; display: inline-block; }
+</style>
+</head>
+<body>
+<header>
+  <a class="logo" href="/">ctOS<small>CENTRAL OPERATING SYSTEM</small></a>
+  <nav>
+    <a href="/">PAINEL</a>
+    <a href="/cameras.html" class="active">CÂMERAS</a>
+    <a href="/power.html">ENERGIA</a>
+    <a href="/traffic.html">TRÂNSITO</a>
+    <a href="/logs.html">LOGS</a>
+    <a href="/api.html">API</a>
+  </nav>
+  <div class="grow"></div>
+  <div class="chip"><span>HORA CIDADE</span><b id="m-hour">--</b></div>
+  <div class="chip"><span>CLIMA</span><b id="m-weather">--</b></div>
+  <div class="chip"><span>ONLINE</span><b id="m-cam" class="b-ok">--</b></div>
+  <div class="chip"><span>DETECÇÕES</span><b id="m-det" class="b-warn">--</b></div>
+  <div class="conn" id="conn">SSE ●</div>
+</header>
+
+<main class="page">
+  <h2>Mural de vigilância <small>8 unidades · feed procedural ao vivo</small></h2>
+
+  <div class="filters">
+    <button class="btn-mini active" data-filter="all">todas</button>
+    <button class="btn-mini" data-filter="online">só online</button>
+    <button class="btn-mini" data-filter="offline">só offline</button>
+    <button class="btn-mini" data-filter="alerts">com detecções</button>
+    <span class="grow"></span>
+    <button class="btn-mini" id="btn-rec-all">● gravar todas</button>
+    <button class="btn-mini" id="btn-stop-all">■ parar todas</button>
+  </div>
+
+  <div class="feed-grid" id="feeds"></div>
+
+  <div class="panel" id="detail" style="margin-top:14px">
+    <div class="title" id="d-title">—</div>
+    <div class="grid cols-2">
+      <div>
+        <div class="kv"><span>posição no grid</span><b id="d-pos">—</b></div>
+        <div class="kv"><span>status</span><b id="d-status">—</b></div>
+        <div class="kv"><span>detecções acumuladas</span><b id="d-det">0</b></div>
+        <div class="kv"><span>pan</span><b id="d-pan">0°</b></div>
+        <div class="kv"><span>zoom</span><b id="d-zoom">1x</b></div>
+      </div>
+      <div>
+        <label class="hint">pan da câmera</label>
+        <input type="range" id="d-range-pan" min="-180" max="180" value="0">
+        <label class="hint">zoom óptico</label>
+        <input type="range" id="d-range-zoom" min="1" max="4" step="0.5" value="1">
+        <div style="display:flex; gap:6px; flex-wrap:wrap">
+          <button class="btn-mini" id="d-rec">■ parar gravação</button>
+          <button class="btn-mini danger" id="d-close">✕ fechar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2>Atividade recente <small>eventos das câmeras</small></h2>
+  <div class="panel" id="cam-events" style="max-height:220px; overflow-y:auto">
+    <div class="hint">aguardando eventos…</div>
+  </div>
+</main>
+
+<footer>
+  <span>ctOS · mural de vigilância</span>
+  <span><a href="/">← voltar ao painel</a></span>
+</footer>
+
+<script>
+'use strict';
+let state = null;
+let filter = 'all';
+let selectedCam = null;
+const seen = new Set();
+const tiles = {};   // id -> {el, canvas, ctx, noise, detect}
+const feedsBox = document.getElementById('feeds');
+const camEvents = document.getElementById('cam-events');
+
+const post = (url, body) => fetch(url, {
+  method: 'POST', headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(body || {}),
+}).then((r) => r.json()).catch(() => null);
+
+/* ---------- construção dos tiles (1x) ---------- */
+function buildTiles() {
+  feedsBox.innerHTML = '';
+  for (const c of state.cameras) {
+    const el = document.createElement('div');
+    el.className = 'feed-tile';
+    el.id = 'tile-' + c.id;
+    el.innerHTML = `
+      <canvas width="320" height="180"></canvas>
+      <div class="label">${c.id}</div>
+      <div class="rec"></div>
+      <div class="meta"><span id="meta-a-${c.id}">—</span><span id="meta-b-${c.id}">—</span></div>`;
+    el.addEventListener('click', () => selectCam(c.id));
+    feedsBox.appendChild(el);
+    const canvas = el.querySelector('canvas');
+    const noise = document.createElement('canvas');
+    noise.width = 64; noise.height = 36;
+    tiles[c.id] = {
+      el, canvas, ctx: canvas.getContext('2d'), noise,
+      nctx: noise.getContext('2d'),
+      detect: { x: Math.random() * 0.7 + 0.1, y: Math.random() * 0.5 + 0.2, w: 0.16, t: Math.random() * 10 },
+    };
+  }
+}
+
+/* ---------- seletor de detalhes ---------- */
+function selectCam(id) {
+  selectedCam = selectedCam === id ? null : id;
+  document.querySelectorAll('.feed-tile').forEach((t) => t.classList.toggle('sel', t.id === 'tile-' + selectedCam));
+  document.getElementById('detail').classList.toggle('show', !!selectedCam);
+  if (!selectedCam || !state) return;
+  const c = state.cameras.find((x) => x.id === selectedCam);
+  document.getElementById('d-range-pan').value = c.pan;
+  document.getElementById('d-range-zoom').value = c.zoom;
+  updateDetail();
+}
+
+function updateDetail() {
+  if (!selectedCam || !state) return;
+  const c = state.cameras.find((x) => x.id === selectedCam);
+  if (!c) return;
+  document.getElementById('d-title').textContent = `${c.id} — unidade de vigilância`;
+  document.getElementById('d-pos').textContent = `(${c.x}, ${c.y})`;
+  const st = document.getElementById('d-status');
+  st.textContent = c.online ? (c.recording ? 'ONLINE · GRAVANDO' : 'ONLINE · PAUSADA') : 'OFFLINE';
+  st.style.color = c.online ? (c.recording ? 'var(--green)' : 'var(--amber)') : 'var(--red)';
+  document.getElementById('d-det').textContent = c.detections;
+  document.getElementById('d-pan').textContent = c.pan + '°';
+  document.getElementById('d-zoom').textContent = c.zoom + 'x';
+  document.getElementById('d-rec').textContent = c.recording ? '■ parar gravação' : '● iniciar gravação';
+}
+
+document.getElementById('d-range-pan').addEventListener('input', function () {
+  document.getElementById('d-pan').textContent = this.value + '°';
+});
+document.getElementById('d-range-pan').addEventListener('change', function () {
+  if (selectedCam) post('/api/camera', { id: selectedCam, pan: +this.value });
+});
+document.getElementById('d-range-zoom').addEventListener('input', function () {
+  document.getElementById('d-zoom').textContent = this.value + 'x';
+});
+document.getElementById('d-range-zoom').addEventListener('change', function () {
+  if (selectedCam) post('/api/camera', { id: selectedCam, zoom: +this.value });
+});
+document.getElementById('d-rec').addEventListener('click', () => {
+  if (!selectedCam || !state) return;
+  const c = state.cameras.find((x) => x.id === selectedCam);
+  post('/api/camera', { id: selectedCam, recording: !c.recording });
+});
+document.getElementById('d-close').addEventListener('click', () => selectCam(selectedCam));
+
+/* ---------- filtros ---------- */
+document.querySelectorAll('.filters [data-filter]').forEach((b) => {
+  b.addEventListener('click', () => {
+    filter = b.dataset.filter;
+    document.querySelectorAll('.filters [data-filter]').forEach((x) => x.classList.toggle('active', x === b));
+    applyFilter();
+  });
+});
+function applyFilter() {
+  if (!state) return;
+  for (const c of state.cameras) {
+    const el = document.getElementById('tile-' + c.id);
+    if (!el) continue;
+    const show =
+      filter === 'all' ? true :
+      filter === 'online' ? c.online :
+      filter === 'offline' ? !c.online :
+      c.detections > 0;
+    el.style.display = show ? '' : 'none';
+  }
+}
+
+document.getElementById('btn-rec-all').addEventListener('click', () => {
+  state.cameras.filter((c) => c.online && !c.recording).forEach((c) => post('/api/camera', { id: c.id, recording: true }));
+});
+document.getElementById('btn-stop-all').addEventListener('click', () => {
+  state.cameras.filter((c) => c.recording).forEach((c) => post('/api/camera', { id: c.id, recording: false }));
+});
+
+/* ---------- render dos feeds ---------- */
+function drawFeed(cam, ts) {
+  const t = tiles[cam.id];
+  if (!t || t.el.style.display === 'none') return;
+  const f = t.ctx, W = 320, H = 180;
+  const night = state.night;
+
+  f.fillStyle = night ? '#0a0f16' : '#131b24';
+  f.fillRect(0, 0, W, H);
+
+  // prédios
+  for (let i = 0; i < 7; i++) {
+    const bw = W / 7;
+    const bh = 50 + ((i * 37 + cam.x * 13) % 60);
+    f.fillStyle = night ? '#0e1620' : '#1a2531';
+    f.fillRect(i * bw + 2, H * 0.5 - bh, bw - 4, bh);
+    f.fillStyle = night ? (i % 2 ? '#2a3345' : '#1c2434') : '#26313f';
+    for (let wy = 0; wy < 3; wy++) for (let wx = 0; wx < 3; wx++) {
+      if ((i + wx + wy + cam.y) % 3 === 0) f.fillRect(i * bw + 8 + wx * 11, H * 0.5 - bh + 9 + wy * 13, 6, 8);
+    }
+  }
+  // rua
+  f.fillStyle = night ? '#0c1219' : '#161f29';
+  f.fillRect(0, H * 0.5, W, H * 0.5);
+  f.strokeStyle = 'rgba(200,220,140,.35)';
+  f.setLineDash([12, 10]);
+  f.lineDashOffset = -ts / 40;
+  f.beginPath(); f.moveTo(0, H * 0.76); f.lineTo(W, H * 0.76); f.stroke();
+  f.setLineDash([]);
+
+  // carros
+  const speed = 2600 - cam.zoom * 300;
+  for (let k = 0; k < 2; k++) {
+    const u = ((ts / (speed + k * 700)) + cam.pan / 360 + k * 0.5) % 1.4;
+    if (u < 1) {
+      f.fillStyle = cam.online ? (k ? '#2f4a63' : '#43566b') : '#1a2530';
+      f.fillRect(u * W - 26, H * 0.72 + k * 26, 46, 15);
+      f.fillStyle = '#ffcf5e';
+      f.fillRect(u * W + 15, H * 0.72 + k * 26 + 8, 5, 4);
+    }
+  }
+
+  if (!cam.online) return; // overlay de sinal perdido é via CSS
+
+  // ruído
+  if (cam.recording) {
+    const img = t.nctx.createImageData(64, 36);
+    for (let i = 0; i < img.data.length; i += 4) {
+      const v = (Math.random() * 40) | 0;
+      img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+      img.data[i + 3] = 26;
+    }
+    t.nctx.putImageData(img, 0, 0);
+    f.imageSmoothingEnabled = false;
+    f.drawImage(t.noise, 0, 0, W, H);
+    f.imageSmoothingEnabled = true;
+  }
+
+  // caixa de detecção
+  const d = t.detect;
+  d.t += 0.016;
+  d.x += Math.sin(d.t) * 0.0015;
+  if (cam.detections > 0) {
+    f.strokeStyle = '#2bff88';
+    f.lineWidth = 1.5;
+    const dx = d.x * W, dy = d.y * H, dw = d.w * W, dh = dw * 1.4;
+    f.strokeRect(dx, dy, dw, dh);
+    f.fillStyle = '#2bff88';
+    f.font = '9px Consolas';
+    f.fillText(`ALVO ${String(cam.detections).padStart(3, '0')}`, dx, dy - 4);
+  }
+
+  // mira
+  f.strokeStyle = 'rgba(63,216,255,.5)';
+  f.lineWidth = 1;
+  f.beginPath();
+  f.moveTo(W / 2 - 8, H / 2); f.lineTo(W / 2 + 8, H / 2);
+  f.moveTo(W / 2, H / 2 - 8); f.lineTo(W / 2, H / 2 + 8);
+  f.stroke();
+
+  // overlays
+  f.fillStyle = cam.recording ? '#ff3b6b' : '#55707f';
+  f.beginPath(); f.arc(14, 14, 4, 0, Math.PI * 2); f.fill();
+  f.font = '10px Consolas';
+  f.fillStyle = '#9fd9ef';
+  f.fillText(cam.recording ? 'REC' : 'PAUSA', 24, 18);
+  f.textAlign = 'right';
+  f.fillText(new Date().toLocaleTimeString('pt-BR'), W - 10, 18);
+  f.fillText(`Z${cam.zoom}x`, W - 10, H - 8);
+  f.textAlign = 'left';
+
+  // scanlines
+  f.fillStyle = 'rgba(0,0,0,.16)';
+  for (let y = 0; y < H; y += 3) f.fillRect(0, y, W, 1);
+
+  // chuva
+  if (state.weather !== 'clear') {
+    f.strokeStyle = state.weather === 'storm' ? 'rgba(160,200,255,.5)' : 'rgba(160,200,255,.3)';
+    f.lineWidth = 1;
+    const n = state.weather === 'storm' ? 40 : 22;
+    for (let i = 0; i < n; i++) {
+      const rx = ((i * 73 + ts / (state.weather === 'storm' ? 3 : 6)) % (W + 40)) - 20;
+      const ry = ((i * 47 + ts / 2.2) % (H + 40)) - 20;
+      f.beginPath(); f.moveTo(rx, ry); f.lineTo(rx - 4, ry + 12); f.stroke();
+    }
+    if (state.weather === 'storm' && Math.random() < 0.01) {
+      f.fillStyle = 'rgba(220,240,255,.5)';
+      f.fillRect(0, 0, W, H);
+    }
+  }
+}
+
+let raf = 0;
+function loop(ts) {
+  raf = requestAnimationFrame(loop);
+  if (!state) return;
+  for (const cam of state.cameras) drawFeed(cam, ts);
+}
+raf = requestAnimationFrame(loop);
+
+/* ---------- HUD + eventos ---------- */
+function updateHud() {
+  const m = state.metrics;
+  const hh = String(Math.floor(state.hour)).padStart(2, '0');
+  const mm = String(Math.floor((state.hour % 1) * 60)).padStart(2, '0');
+  const hEl = document.getElementById('m-hour');
+  hEl.textContent = `${hh}:${mm}${state.night ? ' ☾' : ' ☀'}`;
+  hEl.className = state.night ? 'b-warn' : 'b-ok';
+  const wEl = document.getElementById('m-weather');
+  const wNames = { clear: '☀ LIMPO', rain: '☂ CHUVA', storm: '⚡ TEMPESTADE' };
+  wEl.textContent = wNames[state.weather] || state.weather;
+  wEl.className = state.weather === 'storm' ? 'b-bad' : state.weather === 'rain' ? 'b-warn' : 'b-ok';
+  const cEl = document.getElementById('m-cam');
+  cEl.textContent = `${m.camerasOnline}/${m.camerasTotal}`;
+  cEl.className = m.camerasOnline < m.camerasTotal ? 'b-warn' : 'b-ok';
+  const dEl = document.getElementById('m-det');
+  dEl.textContent = state.cameras.reduce((s, c) => s + c.detections, 0);
+
+  for (const c of state.cameras) {
+    const el = document.getElementById('tile-' + c.id);
+    if (el) {
+      el.classList.toggle('offline', !c.online);
+      const rec = el.querySelector('.rec');
+      rec.textContent = c.online ? (c.recording ? '● REC' : '') : '';
+      document.getElementById('meta-a-' + c.id).textContent = c.online ? `(${c.x},${c.y})` : 'sem sinal';
+      document.getElementById('meta-b-' + c.id).textContent = c.online ? `${c.detections} det` : '—';
+    }
+  }
+  updateDetail();
+  applyFilter();
+}
+
+function pushCamEvent(ev) {
+  const d = document.createElement('div');
+  d.className = 'logline ' + ev.type;
+  d.innerHTML = `<span class="t">${new Date(ev.t).toLocaleTimeString('pt-BR')}</span>
+    <span class="type">${ev.type}</span><span class="msg">${ev.msg}</span>`;
+  camEvents.prepend(d);
+  while (camEvents.children.length > 40) camEvents.lastChild.remove();
+}
+
+const es = new EventSource('/api/stream');
+es.onopen = () => { const e = document.getElementById('conn'); e.textContent = 'SSE ●'; e.classList.remove('off'); };
+es.onerror = () => { const e = document.getElementById('conn'); e.textContent = 'SSE ✕'; e.classList.add('off'); };
+es.onmessage = (ev) => {
+  const first = !state;
+  state = JSON.parse(ev.data);
+  if (first) buildTiles();
+  for (const e of state.events) {
+    const key = e.t + '|' + e.type + '|' + e.msg;
+    if (!seen.has(key)) { seen.add(key); if (!first && (e.type === 'camera' || e.msg.includes('âmera'))) pushCamEvent(e); }
+  }
+  updateHud();
+};
+</script>
+</body>
+</html>

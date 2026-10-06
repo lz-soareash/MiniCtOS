@@ -24,6 +24,7 @@ class CTOS {
     this.cameras = [];
     this.substations = [];
     this.events = [];
+    this.history = [];
     this.threat = 5;
     this.controlled = false;
     this.build();
@@ -88,7 +89,7 @@ class CTOS {
 
   log(type, msg) {
     this.events.unshift({ t: Date.now(), tick: this.tick, type, msg });
-    if (this.events.length > 60) this.events.pop();
+    if (this.events.length > 200) this.events.pop();
   }
 
   lightAt(r, c) {
@@ -354,6 +355,18 @@ class CTOS {
     if (this.controlled) this.threat = clamp(this.threat + 1.2, 0, 100);
     else this.threat = clamp(this.threat - 0.4 + (avgLoad > 75 ? 0.3 : 0), 0, 100);
 
+    // histórico de métricas (1 amostra/tick, janela de 10 min)
+    this.history.push({
+      tick: this.tick,
+      hour: Math.round(this.hour * 10) / 10,
+      congestion: Math.round(avgLoad * 10) / 10,
+      power: Math.round(powerOn * 1000) / 10,
+      threat: Math.round(this.threat * 10) / 10,
+      cameras: this.cameras.filter((c) => c.online).length,
+      weather: this.weather,
+    });
+    if (this.history.length > 600) this.history.shift();
+
     return this.snapshot(avgLoad, powerOn);
   }
 
@@ -390,6 +403,14 @@ class CTOS {
       substations: this.substations.map((s) => ({ id: s.id, zone: s.zone, load: r1(s.load), online: s.online })),
       events: this.events.slice(0, 25),
       grid: { cols: this.cols, rows: this.rows },
+      stats: {
+        avgCongestion: Math.round((this.history.length ? this.history.reduce((s, h) => s + h.congestion, 0) / this.history.length : avgLoad) * 10) / 10,
+        peakCongestion: this.history.length ? Math.max(...this.history.map((h) => h.congestion)) : Math.round(avgLoad * 10) / 10,
+        historyLen: this.history.length,
+        uptime: this.tick,
+        offlineSubs: this.substations.filter((s) => !s.online).length,
+        offlineCams: this.cameras.filter((c) => !c.online).length,
+      },
     };
   }
 }

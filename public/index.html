@@ -76,6 +76,16 @@
   .conn { font-size: 9px; color: var(--dim); letter-spacing: 1px; white-space: nowrap; }
   .conn.off { color: var(--red); }
 
+  nav { display: flex; gap: 3px; flex-wrap: wrap; }
+  nav a {
+    color: var(--dim); text-decoration: none; font-size: 10.5px;
+    letter-spacing: 1.5px; padding: 6px 11px;
+    border: 1px solid transparent; border-radius: 3px;
+    transition: all .15s; white-space: nowrap;
+  }
+  nav a:hover { color: var(--accent); border-color: rgba(63,216,255,.3); }
+  nav a.active { color: var(--accent); background: var(--accent-dim); border-color: rgba(63,216,255,.4); text-shadow: 0 0 10px rgba(63,216,255,.5); }
+
   /* ---------- layout ---------- */
   main {
     flex: 1; min-height: 0; min-width: 0;
@@ -280,6 +290,14 @@
 <body>
 <header>
   <div class="logo">ctOS<small>CENTRAL OPERATING SYSTEM</small></div>
+  <nav>
+    <a href="/" class="active">PAINEL</a>
+    <a href="/cameras.html">CÂMERAS</a>
+    <a href="/power.html">ENERGIA</a>
+    <a href="/traffic.html">TRÂNSITO</a>
+    <a href="/logs.html">LOGS</a>
+    <a href="/api.html">API</a>
+  </nav>
   <div class="chip"><span>RELÓGIO</span><b id="clock">--:--:--</b></div>
   <div class="chip"><span>HORA CIDADE</span><b id="m-hour">--</b></div>
   <div class="chip"><span>CLIMA</span><b id="m-weather" class="b-ok">--</b></div>
@@ -348,6 +366,8 @@
     <div class="hint">
       <b>GET</b> /api/state<br>
       <b>GET</b> /api/health<br>
+      <b>GET</b> /api/history?n=600<br>
+      <b>GET</b> /api/events?n=200<br>
       <b>POST</b> /api/light {id, mode}<br>
       <b>POST</b> /api/lights/all {mode}<br>
       <b>POST</b> /api/lights/line {axis, index, mode}<br>
@@ -356,7 +376,8 @@
       <b>POST</b> /api/weather {kind}<br>
       <b>POST</b> /api/event {kind}<br>
       <b>POST</b> /api/reset<br>
-      <b>SSE</b> /api/stream — stream ao vivo
+      <b>SSE</b> /api/stream — stream ao vivo<br>
+      <br><b>GUIA</b> → <a href="/api.html" style="color:var(--accent)">explorador interativo</a>
     </div>
   </aside>
 </main>

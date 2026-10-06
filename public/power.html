@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="dark">
+<title>ctOS — Rede Elétrica</title>
+<link rel="stylesheet" href="site.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%2305090f'/%3E%3Ccircle cx='8' cy='8' r='4' fill='none' stroke='%233fd8ff' stroke-width='2'/%3E%3C/svg%3E">
+<style>
+  .sub-card { display: flex; flex-direction: column; gap: 8px; }
+  .sub-head { display: flex; align-items: center; gap: 8px; }
+  .sub-head .name { font-size: 14px; color: var(--accent); letter-spacing: 1px; }
+  .sub-head .zone { font-size: 10px; color: var(--dim); letter-spacing: 1.5px; }
+  .gauge { position: relative; height: 90px; }
+  .gauge canvas { width: 100%; height: 90px; }
+  .gauge .num {
+    position: absolute; inset: 0; display: flex; align-items: flex-end;
+    justify-content: center; padding-bottom: 4px;
+    font-size: 22px; font-weight: bold; letter-spacing: 1px;
+  }
+  .legend i { display: inline-block; width: 10px; height: 3px; margin-right: 5px; vertical-align: middle; }
+</style>
+</head>
+<body>
+<header>
+  <a class="logo" href="/">ctOS<small>CENTRAL OPERATING SYSTEM</small></a>
+  <nav>
+    <a href="/">PAINEL</a>
+    <a href="/cameras.html">CÂMERAS</a>
+    <a href="/power.html" class="active">ENERGIA</a>
+    <a href="/traffic.html">TRÂNSITO</a>
+    <a href="/logs.html">LOGS</a>
+    <a href="/api.html">API</a>
+  </nav>
+  <div class="grow"></div>
+  <div class="chip"><span>ENERGIA</span><b id="m-pow" class="b-ok">--%</b></div>
+  <div class="chip"><span>SUBESTAÇÕES</span><b id="m-subs" class="b-ok">--</b></div>
+  <div class="chip"><span>CARGA PICO</span><b id="m-peak" class="b-ok">--%</b></div>
+  <div class="conn" id="conn">SSE ●</div>
+</header>
+
+<main class="page">
+  <h2>Subestações do distrito <small>4 unidades · clique para derrubar/restaurar</small></h2>
+  <div class="grid cols-4" id="subs"></div>
+
+  <h2>Histórico da rede <small>últimos 10 min · 1 amostra/seg</small></h2>
+  <div class="chartbox">
+    <canvas id="chart" width="1000" height="220"></canvas>
+    <div class="legend">
+      <span><i style="background:#2bff88"></i>energia</span>
+      <span><i style="background:#ffb020"></i>congestão</span>
+      <span><i style="background:#ff3b6b"></i>ameaça</span>
+      <span><i style="background:#3fd8ff"></i>câmeras online</span>
+    </div>
+  </div>
+
+  <div class="grid cols-2" style="margin-top:14px">
+    <div>
+      <h2>Controle da rede</h2>
+      <button class="danger" onclick="ev('blackout')">⚡ Simular apagão aleatório</button>
+      <button onclick="ev('restore')">✚ Restaurar rede completa</button>
+      <button class="danger" onclick="ev('storm')">⚡ Tempestade elétrica</button>
+      <button onclick="wx('clear')">☀ Limpar clima</button>
+    </div>
+    <div>
+      <h2>Eventos de energia</h2>
+      <div class="panel" id="pow-events" style="max-height:260px; overflow-y:auto">
+        <div class="hint">aguardando eventos…</div>
+      </div>
+    </div>
+  </div>
+
+  <h2>Estatísticas</h2>
+  <div class="grid cols-3">
+    <div class="panel">
+      <div class="kv"><span>uptime (ticks)</span><b id="s-tick">0</b></div>
+      <div class="kv"><span>hora da cidade</span><b id="s-hour">--</b></div>
+      <div class="kv"><span>clima</span><b id="s-weather">--</b></div>
+    </div>
+    <div class="panel">
+      <div class="kv"><span>congestão média (hist.)</span><b id="s-avg">--%</b></div>
+      <div class="kv"><span>pico de congestionamento</span><b id="s-peak">--%</b></div>
+      <div class="kv"><span>subestações fora</span><b id="s-off">0</b></div>
+    </div>
+    <div class="panel">
+      <div class="kv"><span>ameaça atual</span><b id="s-threat">0</b></div>
+      <div class="kv"><span>controle comprometido</span><b id="s-ctl">não</b></div>
+      <div class="kv"><span>amostras no histórico</span><b id="s-hist">0</b></div>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <span>ctOS · rede elétrica</span>
+  <span><a href="/">← voltar ao painel</a></span>
+</footer>
+
+<script>
+'use strict';
+let state = null;
+let hist = [];
+const seen = new Set();
+const powEvents = document.getElementById('pow-events');
+const ev = (kind) => fetch('/api/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind }) });
+const wx = (kind) => fetch('/api/weather', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind }) });
+const toggleSub = (id, online) => fetch('/api/substation', {
+  method: 'POST', headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ id, online }),
+});
+
+function buildSubs() {
+  document.getElementById('subs').innerHTML = state.substations.map((s) => `
+    <div class="panel sub-card">
+      <div class="sub-head">
+        <span class="dot" id="dot-${s.id}"></span>
+        <span class="name">${s.id}</span>
+        <span class="grow"></span>
+        <span class="zone">${s.zone.toUpperCase()}</span>
+      </div>
+      <div class="gauge"><canvas id="g-${s.id}" width="240" height="90"></canvas>
+        <div class="num" id="gn-${s.id}">--</div></div>
+      <div class="kv"><span>status</span><b id="st-${s.id}">—</b></div>
+      <div class="kv"><span>zona</span><b>${s.zone}</b></div>
+      <button class="btn-mini" id="btn-${s.id}" style="width:100%">—</button>
+    </div>`).join('');
+
+  state.substations.forEach((s) => {
+    document.getElementById('btn-' + s.id).addEventListener('click', () => toggleSub(s.id, !s.online));
+  });
+}
+
+function drawGauge(s) {
+  const cv = document.getElementById('g-' + s.id);
+  if (!cv) return;
+  const c = cv.getContext('2d');
+  const W = cv.width, H = cv.height;
+  c.clearRect(0, 0, W, H);
+  const cx = W / 2, cy = H - 8, R = 78;
+  const start = Math.PI, end = Math.PI * 2;
+  // arco fundo
+  c.lineWidth = 12;
+  c.strokeStyle = '#101922';
+  c.beginPath(); c.arc(cx, cy, R, start, end); c.stroke();
+  if (s.online) {
+    const pct = Math.min(1, s.load / 100);
+    const col = s.load > 85 ? '#ff3b6b' : s.load > 65 ? '#ffb020' : '#2bff88';
+    c.strokeStyle = col;
+    c.shadowColor = col; c.shadowBlur = 8;
+    c.beginPath(); c.arc(cx, cy, R, start, start + Math.PI * pct); c.stroke();
+    c.shadowBlur = 0;
+  } else {
+    c.strokeStyle = '#3a1620';
+    c.setLineDash([6, 6]);
+    c.beginPath(); c.arc(cx, cy, R, start, end); c.stroke();
+    c.setLineDash([]);
+  }
+}
+
+function updateSubs() {
+  for (const s of state.substations) {
+    const dot = document.getElementById('dot-' + s.id);
+    if (!dot) continue;
+    dot.classList.toggle('off', !s.online);
+    drawGauge(s);
+    const gn = document.getElementById('gn-' + s.id);
+    gn.textContent = s.online ? s.load.toFixed(0) + '%' : 'OFF';
+    gn.style.color = !s.online ? 'var(--red)' : s.load > 85 ? 'var(--red)' : s.load > 65 ? 'var(--amber)' : 'var(--green)';
+    const st = document.getElementById('st-' + s.id);
+    st.textContent = s.online ? 'ONLINE' : 'OFFLINE';
+    st.style.color = s.online ? 'var(--green)' : 'var(--red)';
+    const b = document.getElementById('btn-' + s.id);
+    b.textContent = s.online ? '⏻ DERRUBAR' : '⏻ RESTAURAR';
+    b.classList.toggle('danger', s.online);
+  }
+}
+
+/* ---------- gráfico ---------- */
+const chart = document.getElementById('chart');
+const cctx = chart.getContext('2d');
+function drawChart() {
+  const W = chart.width, H = chart.height;
+  cctx.clearRect(0, 0, W, H);
+  // grid
+  cctx.strokeStyle = '#101922';
+  cctx.lineWidth = 1;
+  cctx.fillStyle = '#3a4e5c';
+  cctx.font = '9px Consolas';
+  for (let i = 0; i <= 4; i++) {
+    const y = 10 + (H - 30) * (i / 4);
+    cctx.beginPath(); cctx.moveTo(34, y); cctx.lineTo(W - 6, y); cctx.stroke();
+    cctx.fillText(String(100 - i * 25) + '%', 4, y + 3);
+  }
+  if (hist.length < 2) {
+    cctx.fillStyle = '#55707f';
+    cctx.font = '12px Consolas';
+    cctx.fillText('coletando amostras…', W / 2 - 60, H / 2);
+    return;
+  }
+  const n = hist.length;
+  const px = (i) => 34 + (W - 44) * (i / (n - 1));
+  const py = (v) => 10 + (H - 30) * (1 - Math.max(0, Math.min(100, v)) / 100);
+
+  const lines = [
+    { key: 'power', col: '#2bff88' },
+    { key: 'congestion', col: '#ffb020' },
+    { key: 'threat', col: '#ff3b6b' },
+    { key: 'camerasPct', col: '#3fd8ff' },
+  ];
+  for (const ln of lines) {
+    cctx.strokeStyle = ln.col;
+    cctx.lineWidth = 1.6;
+    cctx.beginPath();
+    hist.forEach((h, i) => {
+      const v = h[ln.key];
+      if (i === 0) cctx.moveTo(px(i), py(v));
+      else cctx.lineTo(px(i), py(v));
+    });
+    cctx.stroke();
+    // preenchimento suave na energia
+    if (ln.key === 'power') {
+      cctx.lineTo(px(n - 1), H - 20);
+      cctx.lineTo(px(0), H - 20);
+      cctx.closePath();
+      cctx.fillStyle = 'rgba(43,255,136,.06)';
+      cctx.fill();
+    }
+  }
+}
+
+/* ---------- eventos ---------- */
+function pushPowEvent(ev) {
+  const d = document.createElement('div');
+  d.className = 'logline ' + ev.type;
+  d.innerHTML = `<span class="t">${new Date(ev.t).toLocaleTimeString('pt-BR')}</span>
+    <span class="type">${ev.type}</span><span class="msg">${ev.msg}</span>`;
+  powEvents.prepend(d);
+  while (powEvents.children.length > 40) powEvents.lastChild.remove();
+}
+
+/* ---------- SSE ---------- */
+const es = new EventSource('/api/stream');
+es.onopen = () => { const e = document.getElementById('conn'); e.textContent = 'SSE ●'; e.classList.remove('off'); };
+es.onerror = () => { const e = document.getElementById('conn'); e.textContent = 'SSE ✕'; e.classList.add('off'); };
+es.onmessage = (msg) => {
+  const first = !state;
+  state = JSON.parse(msg.data);
+  if (first) buildSubs();
+  updateSubs();
+
+  // histórico local: derivado dos pontos SSE acumulados
+  const last = hist[hist.length - 1];
+  if (!last || last.tick !== state.tick) {
+    hist.push({
+      tick: state.tick,
+      power: state.metrics.power,
+      congestion: state.metrics.congestion,
+      threat: state.threat,
+      camerasPct: (state.metrics.camerasOnline / state.metrics.camerasTotal) * 100,
+    });
+    if (hist.length > 600) hist.shift();
+    drawChart();
+  }
+
+  for (const e of state.events) {
+    const key = e.t + '|' + e.type + '|' + e.msg;
+    if (!seen.has(key)) {
+      seen.add(key);
+      if (!first && (e.type === 'power' || e.msg.includes('pagão') || e.msg.includes('sobrecarga') || e.msg.includes('raio'))) pushPowEvent(e);
+    }
+  }
+
+  const m = state.metrics;
+  const pEl = document.getElementById('m-pow');
+  pEl.textContent = m.power.toFixed(0) + '%';
+  pEl.className = m.power < 75 ? 'b-bad' : m.power < 100 ? 'b-warn' : 'b-ok';
+  const sEl = document.getElementById('m-subs');
+  const online = state.substations.filter((s) => s.online).length;
+  sEl.textContent = online + '/' + state.substations.length;
+  sEl.className = online < state.substations.length ? 'b-bad' : 'b-ok';
+  const peakEl = document.getElementById('m-peak');
+  const peak = hist.length ? Math.max(...hist.map((h) => h.power === 100 ? 0 : h.congestion)) : 0;
+  peakEl.textContent = peak.toFixed(0) + '%';
+  peakEl.className = peak > 75 ? 'b-bad' : peak > 50 ? 'b-warn' : 'b-ok';
+
+  // stats
+  const hh = String(Math.floor(state.hour)).padStart(2, '0');
+  const mm = String(Math.floor((state.hour % 1) * 60)).padStart(2, '0');
+  document.getElementById('s-tick').textContent = state.tick;
+  document.getElementById('s-hour').textContent = `${hh}:${mm}${state.night ? ' (noite)' : ' (dia)'}`;
+  const wNames = { clear: 'céu limpo', rain: 'chuva', storm: 'tempestade' };
+  document.getElementById('s-weather').textContent = wNames[state.weather] || state.weather;
+  const st = state.stats || {};
+  document.getElementById('s-avg').textContent = (st.avgCongestion || 0) + '%';
+  document.getElementById('s-peak').textContent = (st.peakCongestion || 0) + '%';
+  document.getElementById('s-off').textContent = st.offlineSubs || 0;
+  document.getElementById('s-threat').textContent = state.threat.toFixed(0) + '/100';
+  document.getElementById('s-ctl').textContent = state.controlled ? 'SIM — ATACANTE ATIVO' : 'não';
+  document.getElementById('s-ctl').style.color = state.controlled ? 'var(--red)' : 'var(--green)';
+  document.getElementById('s-hist').textContent = st.historyLen || hist.length;
+};
+
+window.addEventListener('resize', drawChart);
+</script>
+</body>
+</html>

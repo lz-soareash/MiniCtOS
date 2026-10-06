@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="dark">
+<title>ctOS — API</title>
+<link rel="stylesheet" href="site.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%2305090f'/%3E%3Ccircle cx='8' cy='8' r='4' fill='none' stroke='%233fd8ff' stroke-width='2'/%3E%3C/svg%3E">
+<style>
+  .endpoint { border: 1px solid var(--line); border-radius: 5px; margin-bottom: 10px; background: var(--panel); overflow: hidden; }
+  .ep-head {
+    display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+    cursor: pointer; transition: background .15s; flex-wrap: wrap;
+  }
+  .ep-head:hover { background: rgba(63,216,255,.04); }
+  .method {
+    font-size: 10px; font-weight: bold; letter-spacing: 1.5px;
+    padding: 3px 9px; border-radius: 3px; border: 1px solid;
+  }
+  .m-get { color: var(--green); border-color: rgba(43,255,136,.4); background: rgba(43,255,136,.06); }
+  .m-post { color: var(--accent); border-color: rgba(63,216,255,.4); background: rgba(63,216,255,.06); }
+  .m-sse { color: var(--amber); border-color: rgba(255,176,32,.4); background: rgba(255,176,32,.06); }
+  .ep-path { font-size: 13px; color: var(--text); }
+  .ep-desc { font-size: 10.5px; color: var(--dim); margin-left: auto; }
+  .ep-body { padding: 0 14px 14px; display: none; }
+  .endpoint.open .ep-body { display: block; }
+  .endpoint.open .ep-head { background: rgba(63,216,255,.05); }
+  .ep-body label { font-size: 9.5px; color: var(--dim); letter-spacing: 1.5px; text-transform: uppercase; display: block; margin: 8px 0 3px; }
+  .ep-actions { display: flex; gap: 8px; margin-top: 10px; align-items: center; }
+  .ep-actions button { width: auto; margin: 0; display: inline-block; padding: 7px 16px; }
+  .status { font-size: 11px; letter-spacing: 1px; }
+  .status.ok { color: var(--green); }
+  .status.err { color: var(--red); }
+  .preset-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+  .preset-row button { width: auto; margin: 0; display: inline-block; }
+  #sse-out { max-height: 260px; }
+  .sse-line { color: #8fd9ef; font-size: 11px; border-bottom: 1px solid #0d1520; padding: 2px 0; }
+  .sse-line .dim { color: var(--dim); }
+</style>
+</head>
+<body>
+<header>
+  <a class="logo" href="/">ctOS<small>CENTRAL OPERATING SYSTEM</small></a>
+  <nav>
+    <a href="/">PAINEL</a>
+    <a href="/cameras.html">CÂMERAS</a>
+    <a href="/power.html">ENERGIA</a>
+    <a href="/traffic.html">TRÂNSITO</a>
+    <a href="/logs.html">LOGS</a>
+    <a href="/api.html" class="active">API</a>
+  </nav>
+  <div class="grow"></div>
+  <div class="chip"><span>ENDPOINTS</span><b class="b-ok">13</b></div>
+  <div class="chip"><span>SSE CLIENTES</span><b id="m-clients" class="b-ok">—</b></div>
+  <div class="conn" id="conn">SSE ●</div>
+</header>
+
+<main class="page">
+  <h2>Explorador de API <small>teste os endpoints direto do navegador</small></h2>
+
+  <div class="preset-row">
+    <button class="btn-mini" id="btn-expand">▾ expandir todos</button>
+    <button class="btn-mini" id="btn-collapse">▴ recolher todos</button>
+    <button class="btn-mini" id="btn-health">⚡ testar /api/health</button>
+    <button class="btn-mini" id="btn-reset">↺ /api/reset</button>
+  </div>
+
+  <div id="endpoints"></div>
+
+  <h2>Stream ao vivo <small>SSE · /api/stream</small></h2>
+  <div class="panel">
+    <div class="ep-actions" style="margin-top:0; margin-bottom:8px">
+      <button class="btn-mini" id="sse-toggle">● conectar stream</button>
+      <button class="btn-mini" id="sse-clear">✕ limpar</button>
+      <span class="fcount" id="sse-count">0 mensagens</span>
+    </div>
+    <pre id="sse-out"></pre>
+  </div>
+
+  <h2>Referência rápida</h2>
+  <div class="panel hint">
+    <b>Todos os POST</b> aceitam JSON no corpo e retornam <b>{ ok, ... }</b>.<br>
+    <b>GET /api/state</b> — snapshot completo (semáforos, vias, câmeras, subestações, métricas).<br>
+    <b>GET /api/health</b> — uptime, tick, clientes SSE e memória do processo.<br>
+    <b>GET /api/history?n=600</b> — séries temporais (congestão, energia, ameaça).<br>
+    <b>GET /api/events?n=200</b> — log de eventos (mais completo que o snapshot).<br>
+    <b>SSE /api/stream</b> — estado ao vivo a cada tick (1 Hz) + heartbeat 15 s.<br><br>
+    Exemplo: <b>curl -X POST http://localhost:3000/api/light -H "Content-Type: application/json" -d '{"id":"L-0-0","mode":"blink"}'</b>
+  </div>
+</main>
+
+<footer>
+  <span>ctOS · API v1</span>
+  <span><a href="/">← voltar ao painel</a></span>
+</footer>
+
+<script>
+'use strict';
+
+const ENDPOINTS = [
+  { m: 'GET', path: '/api/state', desc: 'snapshot completo do distrito', body: null },
+  { m: 'GET', path: '/api/health', desc: 'saúde do servidor', body: null },
+  { m: 'GET', path: '/api/history?n=120', desc: 'histórico de métricas', body: null },
+  { m: 'GET', path: '/api/events?n=50', desc: 'log de eventos', body: null },
+  { m: 'POST', path: '/api/light', desc: 'controlar um semáforo', body: { id: 'L-0-0', mode: 'blink' } },
+  { m: 'POST', path: '/api/lights/all', desc: 'modo de todos', body: { mode: 'auto' } },
+  { m: 'POST', path: '/api/lights/line', desc: 'modo por linha/coluna', body: { axis: 'row', index: 0, mode: 'ns' } },
+  { m: 'POST', path: '/api/substation', desc: 'ligar/derrubar subestação', body: { id: 'SUB-01', online: false } },
+  { m: 'POST', path: '/api/camera', desc: 'pan/zoom/gravação', body: { id: 'CAM-01', pan: 90, zoom: 2, recording: true } },
+  { m: 'POST', path: '/api/weather', desc: 'definir clima', body: { kind: 'rain' } },
+  { m: 'POST', path: '/api/event', desc: 'disparar incidente', body: { kind: 'crime' } },
+  { m: 'POST', path: '/api/reset', desc: 'reset completo da simulação', body: {} },
+  { m: 'SSE', path: '/api/stream', desc: 'stream de estado ao vivo', body: null },
+];
+
+const box = document.getElementById('endpoints');
+
+function build() {
+  box.innerHTML = ENDPOINTS.map((ep, i) => `
+    <div class="endpoint" id="ep-${i}">
+      <div class="ep-head" onclick="toggle(${i})">
+        <span class="method ${ep.m === 'GET' ? 'm-get' : ep.m === 'POST' ? 'm-post' : 'm-sse'}">${ep.m}</span>
+        <span class="ep-path">${ep.path}</span>
+        <span class="ep-desc">${ep.desc}</span>
+      </div>
+      <div class="ep-body">
+        ${ep.body ? `<label>corpo JSON (editável)</label>
+          <textarea id="body-${i}" spellcheck="false">${JSON.stringify(ep.body, null, 2)}</textarea>` : ''}
+        <label>resposta</label>
+        <pre id="out-${i}" style="min-height:42px">— clique em executar —</pre>
+        <div class="ep-actions">
+          ${ep.m === 'SSE'
+            ? `<button class="btn-mini" onclick="location.hash='sse'; document.getElementById('sse-toggle').click()">conectar stream ↓</button>`
+            : `<button class="btn-mini" onclick="run(${i})">▶ executar</button>
+               <a href="${ep.path}" target="_blank" style="font-size:10.5px;color:var(--dim)">abrir em nova aba ↗</a>`}
+          <span class="status" id="st-${i}"></span>
+        </div>
+      </div>
+    </div>`).join('');
+}
+
+function toggle(i) { document.getElementById('ep-' + i).classList.toggle('open'); }
+window.toggle = toggle;
+
+async function run(i) {
+  const ep = ENDPOINTS[i];
+  const out = document.getElementById('out-' + i);
+  const st = document.getElementById('st-' + i);
+  const t0 = performance.now();
+  st.textContent = ''; st.className = 'status';
+  out.textContent = 'executando…';
+  try {
+    const opts = { method: ep.m };
+    if (ep.body) {
+      opts.headers = { 'Content-Type': 'application/json' };
+      const ta = document.getElementById('body-' + i);
+      opts.body = ta ? ta.value : JSON.stringify(ep.body);
+      JSON.parse(opts.body); // valida antes de enviar
+    }
+    const r = await fetch(ep.path, opts);
+    const txt = await r.text();
+    const ms = (performance.now() - t0).toFixed(0);
+    let pretty = txt;
+    try { pretty = JSON.stringify(JSON.parse(txt), null, 2); } catch { /* texto puro */ }
+    out.textContent = pretty;
+    st.textContent = `${r.status} · ${ms}ms · ${txt.length}B`;
+    st.className = 'status ' + (r.ok ? 'ok' : 'err');
+  } catch (e) {
+    out.textContent = 'erro: ' + e.message;
+    st.textContent = 'falha';
+    st.className = 'status err';
+  }
+}
+window.run = run;
+
+document.getElementById('btn-expand').addEventListener('click', () => {
+  document.querySelectorAll('.endpoint').forEach((e) => e.classList.add('open'));
+});
+document.getElementById('btn-collapse').addEventListener('click', () => {
+  document.querySelectorAll('.endpoint').forEach((e) => e.classList.remove('open'));
+});
+document.getElementById('btn-health').addEventListener('click', () => run(1));
+document.getElementById('btn-reset').addEventListener('click', () => {
+  if (confirm('Resetar toda a simulação?')) run(ENDPOINTS.findIndex((e) => e.path === '/api/reset'));
+});
+
+/* ---------- SSE monitor ---------- */
+let sse = null;
+let sseCount = 0;
+const sseOut = document.getElementById('sse-out');
+const sseBtn = document.getElementById('sse-toggle');
+
+sseBtn.addEventListener('click', () => {
+  if (sse) {
+    sse.close(); sse = null;
+    sseBtn.textContent = '● conectar stream';
+    sseBtn.classList.remove('active');
+    return;
+  }
+  sse = new EventSource('/api/stream');
+  sseBtn.textContent = '■ desconectar';
+  sseBtn.classList.add('active');
+  sse.onmessage = (e) => {
+    sseCount++;
+    const s = JSON.parse(e.data);
+    const line = document.createElement('div');
+    line.className = 'sse-line';
+    line.innerHTML = `<span class="dim">#${sseCount} tick ${s.tick}</span> ` +
+      `cong ${s.metrics.congestion}% · pow ${s.metrics.power}% · ameaça ${s.threat} ` +
+      `· ${s.metrics.camerasOnline}/${s.metrics.camerasTotal} cams · ${s.weather}` +
+      (s.controlled ? ' · <b style="color:var(--red)">COMPROMETIDO</b>' : '');
+    sseOut.prepend(line);
+    while (sseOut.children.length > 60) sseOut.lastChild.remove();
+    document.getElementById('sse-count').textContent = sseCount + ' mensagens';
+  };
+});
+document.getElementById('sse-clear').addEventListener('click', () => {
+  sseOut.innerHTML = ''; sseCount = 0;
+  document.getElementById('sse-count').textContent = '0 mensagens';
+});
+
+/* ---------- saúde periódica ---------- */
+async function pingHealth() {
+  try {
+    const r = await fetch('/api/health');
+    const j = await r.json();
+    const el = document.getElementById('m-clients');
+    el.textContent = j.clients;
+    el.className = 'b-ok';
+  } catch { document.getElementById('m-clients').textContent = '✕'; }
+}
+setInterval(pingHealth, 5000);
+pingHealth();
+
+build();
+</script>
+</body>
+</html>

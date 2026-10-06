@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="dark">
+<title>ctOS — Trânsito</title>
+<link rel="stylesheet" href="site.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%2305090f'/%3E%3Ccircle cx='8' cy='8' r='4' fill='none' stroke='%233fd8ff' stroke-width='2'/%3E%3C/svg%3E">
+<style>
+  .matrix-wrap { display: flex; gap: 18px; flex-wrap: wrap; }
+  .matrix-box { flex: 1; min-width: 280px; }
+  .mode-pick { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 10px; }
+  .mode-pick button { width: auto; margin: 0; display: inline-block; }
+  #roadtable td:nth-child(3) { width: 40%; }
+  .loadbar { display: flex; align-items: center; gap: 8px; }
+  .loadbar .bar { min-width: 80px; }
+  tr.hot td { background: rgba(255,59,107,.05); }
+</style>
+</head>
+<body>
+<header>
+  <a class="logo" href="/">ctOS<small>CENTRAL OPERATING SYSTEM</small></a>
+  <nav>
+    <a href="/">PAINEL</a>
+    <a href="/cameras.html">CÂMERAS</a>
+    <a href="/power.html">ENERGIA</a>
+    <a href="/traffic.html" class="active">TRÂNSITO</a>
+    <a href="/logs.html">LOGS</a>
+    <a href="/api.html">API</a>
+  </nav>
+  <div class="grow"></div>
+  <div class="chip"><span>CONGESTÃO</span><b id="m-cong" class="b-ok">--%</b></div>
+  <div class="chip"><span>SEMAFOROS</span><b id="m-light" class="b-ok">--</b></div>
+  <div class="chip"><span>VIAS ATIVAS</span><b id="m-roads" class="b-ok">--</b></div>
+  <div class="chip"><span>HORA</span><b id="m-hour">--</b></div>
+  <div class="conn" id="conn">SSE ●</div>
+</header>
+
+<main class="page">
+  <h2>Matriz de controle <small>selecione um modo e clique numa linha/coluna da grade</small></h2>
+  <div class="mode-pick" id="modes">
+    <button class="btn-mini active" data-mode="auto">auto</button>
+    <button class="btn-mini" data-mode="ns">forçar N–S</button>
+    <button class="btn-mini" data-mode="ew">forçar L–O</button>
+    <button class="btn-mini" data-mode="blink">pisca-alerta</button>
+    <button class="btn-mini danger" data-mode="off">desligar</button>
+  </div>
+  <div class="matrix-wrap">
+    <div class="matrix-box">
+      <div class="hint" style="margin-bottom:6px"><b>linhas</b> (eixo horizontal da grade)</div>
+      <div class="matrix" id="row-matrix"></div>
+    </div>
+    <div class="matrix-box">
+      <div class="hint" style="margin-bottom:6px"><b>colunas</b> (eixo vertical da grade)</div>
+      <div class="matrix" id="col-matrix"></div>
+    </div>
+    <div class="matrix-box" style="min-width:300px">
+      <div class="panel">
+        <div class="title">Ações em massa</div>
+        <button onclick="mass('auto')">▸ Todos no automático</button>
+        <button onclick="mass('ns')">▸ Todos eixo N–S</button>
+        <button onclick="mass('ew')">▸ Todos eixo L–O</button>
+        <button class="danger" onclick="mass('blink')">▸ Pisca-alerta geral</button>
+        <button class="danger" onclick="mass('off')">▸ Desligar todos</button>
+        <div class="hint" style="margin-top:8px">Atalhos no painel principal: <b>1–5</b></div>
+      </div>
+      <div class="panel" style="margin-top:10px">
+        <div class="title">Clima (afeta o fluxo)</div>
+        <div style="display:flex; gap:5px; flex-wrap:wrap">
+          <button class="btn-mini" onclick="wx('clear')">☀ limpo</button>
+          <button class="btn-mini" onclick="wx('rain')">☂ chuva</button>
+          <button class="btn-mini danger" onclick="wx('storm')">⚡ tempestade</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2>Vias mais congestionadas <small>top 15 · atualizado ao vivo</small></h2>
+  <div class="panel" style="padding:0; overflow-x:auto">
+    <table id="roadtable">
+      <thead>
+        <tr><th>via</th><th>eixo</th><th>ocupação</th><th>fluxo</th><th>semáforos</th></tr>
+      </thead>
+      <tbody id="roads"></tbody>
+    </table>
+  </div>
+
+  <div class="grid cols-2" style="margin-top:14px">
+    <div>
+      <h2>Distribuição por faixa de carga</h2>
+      <div class="panel" id="dist"></div>
+    </div>
+    <div>
+      <h2>Eventos de trânsito</h2>
+      <div class="panel" id="tr-events" style="max-height:240px; overflow-y:auto">
+        <div class="hint">aguardando eventos…</div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <span>ctOS · malha viária</span>
+  <span><a href="/">← voltar ao painel</a></span>
+</footer>
+
+<script>
+'use strict';
+let state = null;
+let mode = 'auto';
+const seen = new Set();
+const trEvents = document.getElementById('tr-events');
+
+const post = (url, body) => fetch(url, {
+  method: 'POST', headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(body || {}),
+}).then((r) => r.json()).catch(() => null);
+const mass = (m) => post('/api/lights/all', { mode: m });
+const wx = (kind) => post('/api/weather', { kind });
+const ev = (kind) => post('/api/event', { kind });
+
+/* ---------- seletor de modo ---------- */
+document.querySelectorAll('#modes [data-mode]').forEach((b) => {
+  b.addEventListener('click', () => {
+    mode = b.dataset.mode;
+    document.querySelectorAll('#modes [data-mode]').forEach((x) => x.classList.toggle('active', x === b));
+  });
+});
+
+/* ---------- matrizes ---------- */
+function buildMatrices() {
+  const rows = state.grid.rows, cols = state.grid.cols;
+  const rm = document.getElementById('row-matrix');
+  const cm = document.getElementById('col-matrix');
+  rm.style.gridTemplateColumns = `auto repeat(${cols}, 1fr)`;
+  cm.style.gridTemplateColumns = `auto repeat(${rows}, 1fr)`;
+
+  let html = '<div class="cell head">R</div>';
+  for (let c = 0; c < cols; c++) html += `<div class="cell head">${c}</div>`;
+  for (let r = 0; r < rows; r++) {
+    html += `<div class="cell head">${r}</div>`;
+    for (let c = 0; c < cols; c++) {
+      html += `<div class="cell" data-r="${r}" data-c="${c}" id="rc-${r}-${c}">·</div>`;
+    }
+  }
+  rm.innerHTML = html;
+
+  html = '<div class="cell head">C</div>';
+  for (let r = 0; r < rows; r++) html += `<div class="cell head">${r}</div>`;
+  for (let c = 0; c < cols; c++) {
+    html += `<div class="cell head">${c}</div>`;
+    for (let r = 0; r < rows; r++) {
+      html += `<div class="cell" data-r="${r}" data-c="${c}" id="cc-${r}-${c}">·</div>`;
+    }
+  }
+  cm.innerHTML = html;
+
+  // linha inteira / coluna inteira via endpoint line (1 request)
+  document.querySelectorAll('#row-matrix .cell[data-r]').forEach((cell) => {
+    cell.addEventListener('click', async () => {
+      const r = +cell.dataset.r;
+      const j = await post('/api/lights/line', { axis: 'row', index: r, mode });
+      logLocal('control', `linha ${r} → modo ${mode} (${j && j.ok ? j.count : 0} semáforos)`);
+    });
+  });
+  document.querySelectorAll('#col-matrix .cell[data-c]').forEach((cell) => {
+    cell.addEventListener('click', async () => {
+      const c = +cell.dataset.c;
+      const j = await post('/api/lights/line', { axis: 'col', index: c, mode });
+      logLocal('control', `coluna ${c} → modo ${mode} (${j && j.ok ? j.count : 0} semáforos)`);
+    });
+  });
+}
+
+function updateMatrices() {
+  // célula de linha (r, c): estado do semáforo L-r-c
+  for (let r = 0; r < state.grid.rows; r++) {
+    for (let c = 0; c < state.grid.cols; c++) {
+      const l = state.lights[r * state.grid.cols + c];
+      const rc = document.getElementById(`rc-${r}-${c}`);
+      const cc = document.getElementById(`cc-${r}-${c}`);
+      const txt = !l.powered ? '✕' : l.yellow ? 'am' : l.state === 'ns' ? 'NS' : 'LO';
+      const col = !l.powered ? '#3a1620' : l.yellow ? 'var(--amber)' : l.state === 'ns' ? 'var(--accent)' : 'var(--red)';
+      if (rc) { rc.textContent = txt; rc.style.color = col; rc.style.borderColor = l.powered ? 'rgba(255,255,255,.08)' : '#241016'; }
+      if (cc) { cc.textContent = txt; cc.style.color = col; cc.style.borderColor = l.powered ? 'rgba(255,255,255,.08)' : '#241016'; }
+    }
+  }
+}
+
+/* ---------- tabela de vias ---------- */
+function updateRoads() {
+  const sorted = [...state.roads].sort((a, b) => b.load - a.load).slice(0, 15);
+  document.getElementById('roads').innerHTML = sorted.map((r) => {
+    const a = state.lights[r.a], b = state.lights[r.b];
+    const col = r.load < 45 ? 'var(--green)' : r.load < 70 ? 'var(--amber)' : 'var(--red)';
+    const open = a.powered && b.powered;
+    return `<tr class="${r.load > 75 ? 'hot' : ''}">
+      <td>${r.id}</td>
+      <td style="color:var(--dim)">${r.axis === 'h' ? 'L–O' : 'N–S'}</td>
+      <td><div class="loadbar"><span class="bar"><i style="width:${r.load}%;background:${col}"></i></span>
+        <span class="val" style="width:42px;color:${col}">${r.load.toFixed(0)}%</span></div></td>
+      <td style="color:${r.flow > 0.5 ? 'var(--green)' : 'var(--amber)'}">${(r.flow * 100).toFixed(0)}%</td>
+      <td style="color:${open ? 'var(--green)' : 'var(--red)'}">${open ? 'verde' : 'fechado'}</td>
+    </tr>`;
+  }).join('');
+
+  // distribuição
+  const buckets = [0, 0, 0, 0]; // <45, 45-70, 70-85, >85
+  for (const r of state.roads) {
+    if (r.load < 45) buckets[0]++;
+    else if (r.load < 70) buckets[1]++;
+    else if (r.load < 85) buckets[2]++;
+    else buckets[3]++;
+  }
+  const labels = ['livre', 'moderado', 'pesado', 'crítico'];
+  const cols = ['var(--green)', 'var(--amber)', '#ff7a3d', 'var(--red)'];
+  document.getElementById('dist').innerHTML = state.roads.length
+    ? buckets.map((n, i) => {
+        const pct = (n / state.roads.length) * 100;
+        return `<div class="kv"><span style="color:${cols[i]}">${labels[i]}</span>
+          <span style="flex:1; margin:0 10px"><span class="bar"><i style="width:${pct}%;background:${cols[i]}"></i></span></span>
+          <b>${n} (${pct.toFixed(0)}%)</b></div>`;
+      }).join('')
+    : '<div class="hint">sem dados</div>';
+}
+
+/* ---------- eventos ---------- */
+function logLocal(type, msg) {
+  const d = document.createElement('div');
+  d.className = 'logline ' + type;
+  d.innerHTML = `<span class="t">${new Date().toLocaleTimeString('pt-BR')}</span>
+    <span class="type">${type}</span><span class="msg">${msg}</span>`;
+  trEvents.prepend(d);
+  while (trEvents.children.length > 40) trEvents.lastChild.remove();
+}
+
+/* ---------- SSE ---------- */
+const es = new EventSource('/api/stream');
+es.onopen = () => { const e = document.getElementById('conn'); e.textContent = 'SSE ●'; e.classList.remove('off'); };
+es.onerror = () => { const e = document.getElementById('conn'); e.textContent = 'SSE ✕'; e.classList.add('off'); };
+es.onmessage = (msg) => {
+  const first = !state;
+  state = JSON.parse(msg.data);
+  if (first) buildMatrices();
+  updateMatrices();
+  updateRoads();
+
+  const m = state.metrics;
+  const cc = m.congestion + (state.weather === 'storm' ? 8 : state.weather === 'rain' ? 5 : 0);
+  const elC = document.getElementById('m-cong');
+  elC.textContent = Math.min(100, cc).toFixed(0) + '%';
+  elC.className = cc > 75 ? 'b-bad' : cc > 50 ? 'b-warn' : 'b-ok';
+  const elL = document.getElementById('m-light');
+  elL.textContent = m.lights + '/' + m.lightsTotal;
+  elL.className = m.lights < m.lightsTotal ? 'b-bad' : 'b-ok';
+  document.getElementById('m-roads').textContent = state.roads.filter((r) => r.load > 70).length + ' quentes';
+  const hh = String(Math.floor(state.hour)).padStart(2, '0');
+  const mm = String(Math.floor((state.hour % 1) * 60)).padStart(2, '0');
+  document.getElementById('m-hour').textContent = `${hh}:${mm}`;
+
+  for (const e of state.events) {
+    const key = e.t + '|' + e.type + '|' + e.msg;
+    if (!seen.has(key)) {
+      seen.add(key);
+      if (!first && (e.msg.includes(' congestionamento') || e.msg.includes('atacante forçou') || e.type === 'control')) logLocal(e.type, e.msg);
+    }
+  }
+};
+</script>
+</body>
+</html>

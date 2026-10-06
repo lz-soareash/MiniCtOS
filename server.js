@@ -72,6 +72,16 @@ const server = http.createServer(async (req, res) => {
 
   if (p === '/api/state' && req.method === 'GET') return json(res, 200, ctos.snapshot());
 
+  if (p === '/api/history' && req.method === 'GET') {
+    const n = Math.min(Math.max(Number(url.searchParams.get('n')) || 600, 10), 600);
+    return json(res, 200, { ok: true, points: ctos.history.slice(-n) });
+  }
+
+  if (p === '/api/events' && req.method === 'GET') {
+    const n = Math.min(Math.max(Number(url.searchParams.get('n')) || 100, 1), 200);
+    return json(res, 200, { ok: true, events: ctos.events.slice(0, n) });
+  }
+
   if (p === '/api/light' && req.method === 'POST') {
     const b = await readBody(req);
     return json(res, 200, ctos.setLight(b.id, b.mode));
