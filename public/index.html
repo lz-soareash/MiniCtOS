@@ -1,0 +1,1229 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="dark">
+<title>ctOS — Central Operating System</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%2305090f'/%3E%3Ccircle cx='8' cy='8' r='4' fill='none' stroke='%233fd8ff' stroke-width='2'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #05090f;
+    --panel: #0a1018;
+    --panel2: #0d141d;
+    --line: #17222e;
+    --accent: #3fd8ff;
+    --accent-dim: rgba(63, 216, 255, .12);
+    --red: #ff3b6b;
+    --amber: #ffb020;
+    --green: #2bff88;
+    --text: #b9cbd8;
+    --dim: #55707f;
+    --mono: "Cascadia Mono", "Consolas", "Courier New", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    font-size: 13px;
+  }
+
+  /* ---------- header ---------- */
+  header {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+    padding: 8px 14px;
+    background: linear-gradient(180deg, #0c131c, #080d13);
+    border-bottom: 1px solid var(--line);
+    box-shadow: 0 4px 24px rgba(0,0,0,.5);
+    z-index: 5;
+  }
+  .logo { font-size: 18px; font-weight: bold; color: var(--accent); letter-spacing: 3px; text-shadow: 0 0 18px rgba(63,216,255,.5); margin-right: 6px; }
+  .logo small { display: block; font-size: 8px; color: var(--dim); letter-spacing: 3px; font-weight: normal; }
+  .chip {
+    display: flex; flex-direction: column; gap: 1px;
+    padding: 3px 9px; background: var(--panel2);
+    border: 1px solid var(--line); border-radius: 4px;
+    min-width: 74px;
+  }
+  .chip span { font-size: 8px; color: var(--dim); letter-spacing: 1.2px; white-space: nowrap; }
+  .chip b { font-size: 13px; font-weight: 600; transition: color .3s; white-space: nowrap; }
+  .b-ok { color: var(--green); } .b-warn { color: var(--amber); } .b-bad { color: var(--red); }
+  .grow { flex: 1; min-width: 0; }
+  .threat { display: flex; flex-direction: column; gap: 3px; width: 150px; min-width: 110px; }
+  .threat .row { display: flex; justify-content: space-between; font-size: 8px; color: var(--dim); letter-spacing: 1.2px; }
+  .threat .row b { font-size: 11px; }
+  .bar { height: 7px; background: #101922; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 0; border-radius: 3px; transition: width .6s ease, background .6s; background: var(--green); }
+  .access {
+    display: flex; align-items: center; gap: 7px;
+    padding: 6px 11px; border-radius: 4px; font-size: 10.5px; letter-spacing: 1px;
+    border: 1px solid rgba(43,255,136,.35); color: var(--green);
+    background: rgba(43,255,136,.06);
+    transition: all .3s; white-space: nowrap;
+  }
+  .access.hacked { border-color: rgba(255,59,107,.5); color: var(--red); background: rgba(255,59,107,.08); animation: glitch 1.2s infinite; }
+  .led { width: 8px; height: 8px; border-radius: 50%; background: currentColor; box-shadow: 0 0 8px currentColor; animation: blink 2s infinite; flex-shrink: 0; }
+  @keyframes blink { 50% { opacity: .3; } }
+  @keyframes glitch { 0%,90%,100% { transform: none; } 92% { transform: translateX(-2px); } 94% { transform: translateX(2px); } }
+  .conn { font-size: 9px; color: var(--dim); letter-spacing: 1px; white-space: nowrap; }
+  .conn.off { color: var(--red); }
+
+  /* ---------- layout ---------- */
+  main {
+    flex: 1; min-height: 0; min-width: 0;
+    display: grid;
+    grid-template-columns: var(--w-left, 245px) minmax(0, 1fr) var(--w-right, 275px);
+  }
+  body.hide-left { --w-left: 0px; }
+  body.hide-right { --w-right: 0px; }
+  aside {
+    background: var(--panel); padding: 14px; overflow-y: auto; overflow-x: hidden;
+    border-right: 1px solid var(--line); min-width: 0;
+    transition: opacity .18s;
+  }
+  aside.right { border-right: none; border-left: 1px solid var(--line); }
+  body.hide-left > aside:not(.right),
+  body.hide-right > aside.right {
+    padding: 0; border: none; opacity: 0; pointer-events: none; overflow: hidden;
+  }
+  .panel-toggle {
+    position: absolute; top: 10px; z-index: 6;
+    width: 26px; height: 26px; padding: 0; margin: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(10,16,24,.9); border: 1px solid var(--line);
+    border-radius: 4px; color: var(--dim); font-size: 13px; cursor: pointer;
+    transition: all .15s;
+  }
+  .panel-toggle:hover { color: var(--accent); border-color: var(--accent); transform: none; box-shadow: 0 0 10px rgba(63,216,255,.25); }
+  #tgl-left { left: 10px; }
+  #tgl-right { right: 10px; }
+  h3 {
+    font-size: 9px; color: var(--accent); letter-spacing: 2.5px;
+    margin: 18px 0 8px; text-transform: uppercase;
+    padding-bottom: 4px; border-bottom: 1px solid var(--line);
+  }
+  h3:first-child { margin-top: 0; }
+  button {
+    display: block; width: 100%; margin-bottom: 5px; padding: 8px 10px;
+    background: linear-gradient(180deg, #101923, #0c141c);
+    color: var(--text); border: 1px solid var(--line); border-radius: 3px;
+    font-family: inherit; font-size: 11.5px; cursor: pointer; text-align: left;
+    transition: all .15s; letter-spacing: .5px;
+  }
+  button:hover { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 12px rgba(63,216,255,.15); transform: translateX(2px); }
+  button:active { transform: translateX(2px) scale(.98); }
+  button.danger { border-color: rgba(255,59,107,.25); color: #d8899c; }
+  button.danger:hover { border-color: var(--red); color: var(--red); box-shadow: 0 0 12px rgba(255,59,107,.2); }
+  button:disabled { opacity: .35; cursor: not-allowed; transform: none; box-shadow: none; }
+  button kbd {
+    float: right; font-family: inherit; font-size: 9px; color: var(--dim);
+    border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; background: #0a1017;
+  }
+  button:hover kbd { color: var(--accent); border-color: var(--accent); }
+  .btn-mini { display: inline-block; width: auto; padding: 4px 9px; margin: 2px 3px 0 0; font-size: 10.5px; }
+  .btn-mini.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+
+  #tooltip {
+    position: fixed; z-index: 50; display: none; pointer-events: none;
+    background: rgba(8,13,19,.95); border: 1px solid var(--accent);
+    padding: 6px 10px; font-size: 11px; color: var(--text); border-radius: 3px;
+    box-shadow: 0 4px 18px rgba(0,0,0,.6), 0 0 12px rgba(63,216,255,.15);
+    max-width: 240px; line-height: 1.5;
+  }
+  #tooltip b { color: var(--accent); }
+  #tooltip .dim { color: var(--dim); }
+
+  #fps {
+    position: absolute; bottom: 158px; right: 14px; z-index: 3;
+    font-size: 10px; color: var(--dim); letter-spacing: 1px; pointer-events: none;
+    transition: bottom .18s;
+  }
+  body.hide-term #fps { bottom: 12px; }
+
+  #feed {
+    width: 100%; aspect-ratio: 16/9; background: #050809;
+    border: 1px solid var(--line); border-radius: 3px; margin-top: 6px;
+    display: block; image-rendering: pixelated;
+  }
+
+  .card {
+    display: flex; align-items: center; gap: 8px; padding: 7px 9px;
+    border: 1px solid var(--line); border-radius: 4px; margin-bottom: 6px;
+    background: linear-gradient(180deg, #0e161f, #0b121a); font-size: 11.5px;
+    transition: border-color .2s;
+  }
+  .card:hover { border-color: #26374a; }
+  .card .id { width: 52px; color: var(--text); }
+  .card .bar { flex: 1; height: 6px; }
+  .card .val { width: 34px; text-align: right; color: var(--dim); font-size: 10.5px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 6px var(--green); flex-shrink: 0; transition: all .3s; }
+  .dot.off { background: var(--red); box-shadow: 0 0 6px var(--red); animation: blink 1s infinite; }
+
+  .inspector { border: 1px solid var(--line); border-radius: 4px; padding: 10px; font-size: 11.5px; background: var(--panel2); line-height: 1.7; }
+  .inspector .title { color: var(--accent); font-size: 13px; letter-spacing: 1px; margin-bottom: 4px; }
+  .inspector .kv { display: flex; justify-content: space-between; border-bottom: 1px dashed #16202b; padding: 1px 0; }
+  .inspector .kv span { color: var(--dim); }
+  .inspector .kv b { font-weight: 600; }
+  .hint { color: var(--dim); font-size: 11px; line-height: 1.7; }
+  .hint b { color: var(--accent); font-weight: 600; }
+  input[type=range] { width: 100%; accent-color: var(--accent); margin: 4px 0 8px; background: transparent; }
+
+  /* ---------- map ---------- */
+  #mapwrap { position: relative; display: flex; flex-direction: column; min-width: 0; background: #04070b; }
+  #map { flex: 1; width: 100%; display: block; }
+  #mapwrap::before {
+    content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 2;
+    background: repeating-linear-gradient(0deg, rgba(255,255,255,.022) 0 1px, transparent 1px 3px);
+  }
+  #mapwrap::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 2;
+    background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,.55) 100%);
+  }
+  #hud {
+    position: absolute; top: 12px; left: 14px; z-index: 3;
+    font-size: 10px; color: var(--accent); letter-spacing: 2px; opacity: .8;
+    text-shadow: 0 0 10px rgba(63,216,255,.6); pointer-events: none;
+  }
+  #hud .sub2 { color: var(--dim); font-size: 9px; margin-top: 3px; }
+  #banner {
+    position: absolute; top: 44px; left: 50%; transform: translateX(-50%); z-index: 4;
+    display: none; padding: 8px 22px; border: 1px solid var(--red);
+    background: rgba(30,4,12,.85); color: var(--red); font-size: 12px; letter-spacing: 3px;
+    text-shadow: 0 0 12px rgba(255,59,107,.8); animation: blink 1s infinite; border-radius: 3px;
+  }
+  #banner.show { display: block; }
+
+  #terminal {
+    height: 148px; background: #05080c; border-top: 1px solid var(--line);
+    padding: 8px 14px; overflow-y: auto; font-size: 11.5px; line-height: 1.65; z-index: 3;
+    transition: height .18s, padding .18s;
+  }
+  body.hide-term #terminal { height: 0; padding: 0; border-top: none; overflow: hidden; }
+  #tgl-term {
+    position: absolute; right: 46px; bottom: 154px; z-index: 6;
+    width: 26px; height: 26px; padding: 0;
+    background: rgba(10,16,24,.9); border: 1px solid var(--line); border-radius: 4px;
+    color: var(--dim); font-size: 12px; cursor: pointer; transition: all .15s;
+  }
+  #tgl-term:hover { color: var(--accent); border-color: var(--accent); transform: none; }
+  body.hide-term #tgl-term { bottom: 8px; }
+  #terminal div { white-space: nowrap; }
+  #terminal .t { color: #3a4e5c; }
+  #terminal .alert { color: var(--red); }
+  #terminal .control { color: var(--accent); }
+  #terminal .power { color: var(--amber); }
+  #terminal .camera { color: var(--green); }
+  #terminal .system { color: var(--dim); font-style: italic; }
+  #terminal div:first-child { animation: slidein .25s ease; }
+  @keyframes slidein { from { opacity: 0; transform: translateY(-6px); } }
+
+  /* ---------- responsivo ---------- */
+  @media (max-width: 1500px) {
+    main { grid-template-columns: var(--w-left, 220px) minmax(0, 1fr) var(--w-right, 250px); }
+    .chip { min-width: 66px; padding: 3px 7px; }
+    .chip span { font-size: 7.5px; }
+  }
+  @media (max-width: 1200px) {
+    .logo small { display: none; }
+    .threat { width: 120px; }
+    main { grid-template-columns: var(--w-left, 200px) minmax(0, 1fr) var(--w-right, 230px); }
+    aside { padding: 10px; }
+    h3 { margin: 12px 0 6px; }
+  }
+  @media (max-width: 980px) {
+    header { gap: 6px 8px; padding: 6px 8px; }
+    .chip { min-width: 0; }
+    .chip b { font-size: 12px; }
+    .access { font-size: 9.5px; padding: 5px 8px; }
+    .logo { font-size: 15px; letter-spacing: 2px; }
+    /* painéis viram gavetas sobre o mapa */
+    main { grid-template-columns: minmax(0, 1fr); position: relative; }
+    aside, aside.right {
+      position: absolute; top: 0; bottom: 0; z-index: 7;
+      width: min(300px, 86vw); transition: transform .2s ease, opacity .2s;
+      box-shadow: 0 0 30px rgba(0,0,0,.7);
+    }
+    aside { left: 0; transform: translateX(-102%); opacity: 0; pointer-events: none; border-right: 1px solid var(--line); }
+    aside.right { right: 0; transform: translateX(102%); opacity: 0; pointer-events: none; border-left: 1px solid var(--line); }
+    body:not(.hide-left) > aside:not(.right) { transform: none; opacity: 1; pointer-events: auto; }
+    body:not(.hide-right) > aside.right { transform: none; opacity: 1; pointer-events: auto; }
+    body.hide-left > aside:not(.right), body.hide-right > aside.right { padding: 14px; opacity: 0; }
+    #terminal { height: 110px; font-size: 10.5px; }
+    #fps { bottom: 120px; }
+    #tgl-term { bottom: 116px; }
+  }
+  @media (max-width: 640px) {
+    .threat { width: 90px; }
+    .conn { display: none; }
+    #hud { font-size: 9px; }
+  }
+  @media (max-height: 560px) {
+    #terminal { height: 90px; }
+    #fps { bottom: 100px; }
+    #tgl-term { bottom: 96px; }
+  }
+
+  ::-webkit-scrollbar { width: 7px; height: 7px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: #1c2a38; border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: #2a3f52; }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">ctOS<small>CENTRAL OPERATING SYSTEM</small></div>
+  <div class="chip"><span>RELÓGIO</span><b id="clock">--:--:--</b></div>
+  <div class="chip"><span>HORA CIDADE</span><b id="m-hour">--</b></div>
+  <div class="chip"><span>CLIMA</span><b id="m-weather" class="b-ok">--</b></div>
+  <div class="chip"><span>CONGESTÃO</span><b id="m-cong" class="b-ok">--%</b></div>
+  <div class="chip"><span>ENERGIA</span><b id="m-pow" class="b-ok">--%</b></div>
+  <div class="chip"><span>CÂMERAS</span><b id="m-cam" class="b-ok">--</b></div>
+  <div class="chip"><span>SEMAFOROS</span><b id="m-light" class="b-ok">--</b></div>
+  <div class="grow"></div>
+  <div class="threat">
+    <div class="row"><span>NÍVEL DE AMEAÇA</span><b id="threat-num">0</b></div>
+    <div class="bar"><i id="threatfill"></i></div>
+  </div>
+  <div class="access" id="access"><span class="led"></span><span id="access-txt">ACESSO NEGADO</span></div>
+  <div class="conn" id="conn">SSE ●</div>
+</header>
+
+<main>
+  <aside>
+    <h3>Controle de semáforos</h3>
+    <button onclick="lightsAll('auto')">▸ Modo automático (todos) <kbd>1</kbd></button>
+    <button onclick="lightsAll('ns')">▸ Forçar eixo N–S <kbd>2</kbd></button>
+    <button onclick="lightsAll('ew')">▸ Forçar eixo L–O <kbd>3</kbd></button>
+    <button onclick="lightsAll('blink')">▸ Pisca-alerta <kbd>4</kbd></button>
+    <button class="danger" onclick="lightsAll('off')">▸ Desligar todos <kbd>5</kbd></button>
+
+    <h3>Clima do distrito</h3>
+    <button onclick="setWeather('clear')">☀ Céu limpo</button>
+    <button onclick="setWeather('rain')">☂ Chuva</button>
+    <button class="danger" onclick="setWeather('storm')">⚡ Tempestade</button>
+
+    <h3>Rede elétrica</h3>
+    <div id="subs"></div>
+
+    <h3>Câmeras</h3>
+    <div id="cams"></div>
+
+    <h3>Simular incidente</h3>
+    <button class="danger" onclick="event('blackout')">⚡ Apagão <kbd>F1</kbd></button>
+    <button class="danger" onclick="event('hack')">☠ Intrusão no ctOS <kbd>F2</kbd></button>
+    <button class="danger" onclick="event('attacker')">☠☠ Ataque coordenado <kbd>F3</kbd></button>
+    <button onclick="event('jam')">≋ Congestionamento</button>
+    <button onclick="event('crime')">◉ Crime</button>
+    <button onclick="event('restore')">✚ Restaurar tudo <kbd>F4</kbd></button>
+    <button class="danger" onclick="doReset()">↺ Reset completo</button>
+  </aside>
+
+  <section id="mapwrap">
+    <canvas id="map"></canvas>
+    <button class="panel-toggle" id="tgl-left" title="Painel esquerdo (Q)" aria-label="Alternar painel esquerdo">☰</button>
+    <button class="panel-toggle" id="tgl-right" title="Painel direito (E)" aria-label="Alternar painel direito">☷</button>
+    <div id="hud">DISTRITO CHICAGO-NORTE<div class="sub2" id="hud2">tick 0 · 0 entidades</div></div>
+    <div id="fps">-- FPS</div>
+    <div id="banner">⚠ CONTROLE COMPROMETIDO — ATACANTE ATIVO ⚠</div>
+    <button id="tgl-term" title="Terminal (T)" aria-label="Alternar terminal">▂</button>
+    <div id="terminal"></div>
+  </section>
+
+  <aside class="right">
+    <h3>Inspector</h3>
+    <div class="inspector" id="inspector"><span class="hint">Clique num <b>nó do mapa</b> para inspecionar (semáforo, câmera ou subestação).</span></div>
+
+    <h3>Métricas do distrito</h3>
+    <div class="inspector" id="metrics">aguardando dados…</div>
+
+    <h3>Referência da API</h3>
+    <div class="hint">
+      <b>GET</b> /api/state<br>
+      <b>GET</b> /api/health<br>
+      <b>POST</b> /api/light {id, mode}<br>
+      <b>POST</b> /api/lights/all {mode}<br>
+      <b>POST</b> /api/lights/line {axis, index, mode}<br>
+      <b>POST</b> /api/substation {id, online}<br>
+      <b>POST</b> /api/camera {id, pan, zoom}<br>
+      <b>POST</b> /api/weather {kind}<br>
+      <b>POST</b> /api/event {kind}<br>
+      <b>POST</b> /api/reset<br>
+      <b>SSE</b> /api/stream — stream ao vivo
+    </div>
+  </aside>
+</main>
+
+<div id="tooltip"></div>
+
+<script>
+'use strict';
+
+/* ================= estado & rede ================= */
+let state = null;
+let selected = null;          // {type:'light'|'cam'|'sub', id}
+let inspectorDirty = true;
+const seenEvents = new Set();
+
+const canvas = document.getElementById('map');
+const ctx = canvas.getContext('2d');
+const term = document.getElementById('terminal');
+
+function addLine(type, text) {
+  const d = document.createElement('div');
+  d.innerHTML = `<span class="t">[${new Date().toLocaleTimeString('pt-BR')}]</span> <span class="${type}">${text}</span>`;
+  term.prepend(d);
+  while (term.children.length > 60) term.lastChild.remove();
+}
+
+async function post(url, body) {
+  try {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {}),
+    });
+    const j = await r.json();
+    if (j && j.ok === false) addLine('alert', `erro: ${j.error || 'falha na operação'}`);
+    return j;
+  } catch (e) {
+    addLine('alert', `falha de rede: ${e.message}`);
+  }
+}
+
+const lightsAll = (mode) => post('/api/lights/all', { mode });
+const event = (kind) => post('/api/event', { kind });
+const doReset = () => post('/api/reset');
+const subToggle = (id, online) => post('/api/substation', { id, online });
+const camAction = (id, patch) => post('/api/camera', Object.assign({ id }, patch));
+const setWeather = (kind) => post('/api/weather', { kind });
+
+/* painéis colapsáveis (Q/E/T) */
+function togglePanel(which) {
+  document.body.classList.toggle('hide-' + which);
+  // mapa precisa reacomodar o canvas
+  requestAnimationFrame(() => { refreshRect(); layerDirty = true; });
+}
+document.getElementById('tgl-left').addEventListener('click', () => togglePanel('left'));
+document.getElementById('tgl-right').addEventListener('click', () => togglePanel('right'));
+document.getElementById('tgl-term').addEventListener('click', () => togglePanel('term'));
+
+// em telas estreitas, painéis começam fechados (gavetas)
+const mqNarrow = window.matchMedia('(max-width: 980px)');
+function applyInitialPanels() {
+  if (mqNarrow.matches) document.body.classList.add('hide-left', 'hide-right');
+}
+applyInitialPanels();
+if (mqNarrow.addEventListener) mqNarrow.addEventListener('change', applyInitialPanels);
+const setLight = (id, mode) => { post('/api/light', { id, mode }); if (selected && selected.id === id) inspectorDirty = true; };
+
+const es = new EventSource('/api/stream');
+es.onopen = () => { document.getElementById('conn').textContent = 'SSE ●'; document.getElementById('conn').classList.remove('off'); };
+es.onerror = () => { document.getElementById('conn').textContent = 'SSE ✕ reconectando'; document.getElementById('conn').classList.add('off'); };
+es.onmessage = (e) => {
+  const first = !state;
+  state = JSON.parse(e.data);
+  layerDirty = true;
+  for (const ev of state.events) {
+    const key = ev.t + '|' + ev.type + '|' + ev.msg;
+    if (!seenEvents.has(key)) { seenEvents.add(key); if (!first) addLine(ev.type, ev.msg); }
+  }
+  if (first) { buildLists(); addLine('system', 'stream conectado — ctOS ao vivo'); }
+  const needInsp = inspectorDirty;
+  updateHud();
+  if (needInsp) renderInspector();
+};
+
+/* ================= painéis DOM (construídos 1x) ================= */
+function buildLists() {
+  document.getElementById('subs').innerHTML = state.substations.map((s) => `
+    <div class="card" id="card-${s.id}">
+      <span class="dot" id="dot-${s.id}"></span>
+      <span class="id">${s.id}</span>
+      <span class="bar"><i id="fill-${s.id}"></i></span>
+      <span class="val" id="val-${s.id}">--</span>
+      <button class="btn-mini danger" id="btn-${s.id}" onclick="subToggle('${s.id}', ${s.online ? 'false' : 'true'})">--</button>
+    </div>`).join('');
+
+  document.getElementById('cams').innerHTML = state.cameras.map((c) => `
+    <div class="card" id="card-${c.id}">
+      <span class="dot" id="dot-${c.id}"></span>
+      <span class="id">${c.id}</span>
+      <span class="val" id="val-${c.id}" style="width:56px">--</span>
+      <button class="btn-mini" id="pl-${c.id}" onclick="camAction('${c.id}',{pan:-180})">↤</button>
+      <button class="btn-mini" id="pr-${c.id}" onclick="camAction('${c.id}',{pan:180})">↦</button>
+      <button class="btn-mini" id="pz-${c.id}" onclick="camAction('${c.id}',{zoom:4})">🔍</button>
+    </div>`).join('');
+}
+
+function setBar(fillEl, pct, cls) {
+  fillEl.style.width = pct + '%';
+  fillEl.style.background = cls;
+}
+
+function updateHud() {
+  const s = state, m = s.metrics;
+  document.getElementById('clock').textContent = new Date(s.time).toLocaleTimeString('pt-BR');
+  document.getElementById('hud2').textContent = `tick ${s.tick} · ${s.lights.length + s.roads.length + s.cameras.length + s.substations.length} entidades`;
+
+  const hh = String(Math.floor(s.hour)).padStart(2, '0');
+  const mm = String(Math.floor((s.hour % 1) * 60)).padStart(2, '0');
+  const hourEl = document.getElementById('m-hour');
+  hourEl.textContent = `${hh}:${mm}${s.night ? ' ☾' : ' ☀'}`;
+  hourEl.className = s.night ? 'b-warn' : 'b-ok';
+  const wEl = document.getElementById('m-weather');
+  const wNames = { clear: '☀ LIMPO', rain: '☂ CHUVA', storm: '⚡ TEMPESTADE' };
+  wEl.textContent = wNames[s.weather] || s.weather;
+  wEl.className = s.weather === 'storm' ? 'b-bad' : s.weather === 'rain' ? 'b-warn' : 'b-ok';
+
+  const grade = (v, w, b) => v > b ? 'b-bad' : v > w ? 'b-warn' : 'b-ok';
+  const cong = m.congestion, pow = m.power;
+  const weatherPenalty = s.weather === 'storm' ? 8 : s.weather === 'rain' ? 5 : 0;
+  const congShown = Math.min(100, cong + weatherPenalty);
+  const elC = document.getElementById('m-cong');
+  elC.textContent = congShown.toFixed(0) + '%'; elC.className = grade(congShown, 50, 75);
+  const elP = document.getElementById('m-pow');
+  elP.textContent = pow.toFixed(0) + '%'; elP.className = pow < 75 ? 'b-bad' : pow < 100 ? 'b-warn' : 'b-ok';
+  const elCam = document.getElementById('m-cam');
+  elCam.textContent = m.camerasOnline + '/' + m.camerasTotal;
+  elCam.className = m.camerasOnline < m.camerasTotal ? 'b-warn' : 'b-ok';
+  const elL = document.getElementById('m-light');
+  elL.textContent = m.lights + '/' + m.lightsTotal;
+  elL.className = m.lights < m.lightsTotal ? 'b-bad' : 'b-ok';
+
+  const tf = document.getElementById('threatfill');
+  tf.style.width = s.threat + '%';
+  tf.style.background = s.threat > 70 ? 'var(--red)' : s.threat > 40 ? 'var(--amber)' : 'var(--green)';
+  document.getElementById('threat-num').textContent = s.threat.toFixed(0);
+  document.getElementById('threat-num').style.color = s.threat > 70 ? 'var(--red)' : s.threat > 40 ? 'var(--amber)' : 'var(--green)';
+
+  const acc = document.getElementById('access');
+  acc.classList.toggle('hacked', s.controlled);
+  document.getElementById('access-txt').textContent = s.controlled ? 'COMPROMETIDO' : 'ACESSO NEGADO';
+  document.getElementById('banner').classList.toggle('show', s.controlled);
+
+  for (const sub of s.substations) {
+    const dot = document.getElementById('dot-' + sub.id);
+    if (!dot) continue;
+    dot.classList.toggle('off', !sub.online);
+    const cls = sub.load > 85 ? 'var(--red)' : sub.load > 65 ? 'var(--amber)' : 'var(--green)';
+    setBar(document.getElementById('fill-' + sub.id), sub.online ? sub.load : 0, cls);
+    document.getElementById('val-' + sub.id).textContent = sub.online ? sub.load.toFixed(0) + '%' : 'OFF';
+    const b = document.getElementById('btn-' + sub.id);
+    b.textContent = sub.online ? 'OFF' : 'ON';
+    b.onclick = () => subToggle(sub.id, !sub.online);
+  }
+
+  for (const c of s.cameras) {
+    const dot = document.getElementById('dot-' + c.id);
+    if (!dot) continue;
+    dot.classList.toggle('off', !c.online);
+    document.getElementById('val-' + c.id).textContent = c.online ? c.detections + ' det.' : 'offline';
+    for (const p of ['pl', 'pr', 'pz']) document.getElementById(p + '-' + c.id).disabled = !c.online;
+  }
+
+  document.getElementById('metrics').innerHTML = `
+    <div class="kv"><span>uptime (ticks)</span><b>${s.tick}</b></div>
+    <div class="kv"><span>hora da cidade</span><b>${hh}:${mm}${s.night ? ' (noite)' : ' (dia)'}</b></div>
+    <div class="kv"><span>clima</span><b>${(wNames[s.weather] || s.weather).replace(/^\S+ /, '')}</b></div>
+    <div class="kv"><span>congestão média</span><b>${cong.toFixed(1)}%</b></div>
+    <div class="kv"><span>energia</span><b>${pow.toFixed(0)}%</b></div>
+    <div class="kv"><span>semaforos online</span><b>${m.lights}/${m.lightsTotal}</b></div>
+    <div class="kv"><span>cameras online</span><b>${m.camerasOnline}/${m.camerasTotal}</b></div>
+    <div class="kv"><span>alertas registrados</span><b>${m.alerts}</b></div>
+    <div class="kv"><span>ameaça</span><b>${s.threat.toFixed(0)}/100</b></div>`;
+
+  if (selected) {
+    if (selected.type === 'light') {
+      const l = s.lights.find((x) => x.id === selected.id);
+      if (l && inspectorDirty === false) {
+        const st = document.getElementById('ins-state'); const md = document.getElementById('ins-mode'); const pw = document.getElementById('ins-power');
+        if (st) { st.textContent = l.state.toUpperCase(); st.style.color = l.state === 'ns' ? 'var(--accent)' : 'var(--red)'; }
+        if (md) md.textContent = l.mode;
+        if (pw) { pw.textContent = l.powered ? 'ONLINE' : 'OFFLINE'; pw.style.color = l.powered ? 'var(--green)' : 'var(--red)'; }
+        document.querySelectorAll('#inspector .btn-mini[data-mode]').forEach((b) => b.classList.toggle('active', b.dataset.mode === l.mode));
+      }
+    } else if (selected.type === 'sub') {
+      const sub = s.substations.find((x) => x.id === selected.id);
+      const ld = document.getElementById('ins-load');
+      if (sub && ld) ld.textContent = sub.online ? sub.load.toFixed(0) + '%' : 'OFFLINE';
+    } else if (selected.type === 'cam') {
+      const c = s.cameras.find((x) => x.id === selected.id);
+      const dn = document.getElementById('ins-det');
+      if (c && dn) dn.textContent = c.detections;
+    }
+  }
+  inspectorDirty = false;
+}
+
+function renderInspector() {
+  const box = document.getElementById('inspector');
+  if (!selected || !state) {
+    stopFeed();
+    box.innerHTML = '<span class="hint">Clique num <b>nó do mapa</b> para inspecionar (semáforo, câmera ou subestação).</span>';
+    return;
+  }
+  if (selected.type !== 'cam') stopFeed();
+  if (selected.type === 'light') {
+    const l = state.lights.find((x) => x.id === selected.id);
+    if (!l) { selected = null; return renderInspector(); }
+    box.innerHTML = `
+      <div class="title">◉ ${l.id}</div>
+      <div class="kv"><span>coordenada</span><b>(${l.x}, ${l.y})</b></div>
+      <div class="kv"><span>estado</span><b id="ins-state" style="color:${l.state === 'ns' ? 'var(--accent)' : 'var(--red)'}">${l.state.toUpperCase()}</b></div>
+      <div class="kv"><span>modo</span><b id="ins-mode">${l.mode}</b></div>
+      <div class="kv"><span>energia</span><b id="ins-power" style="color:${l.powered ? 'var(--green)' : 'var(--red)'}">${l.powered ? 'ONLINE' : 'OFFLINE'}</b></div>
+      <div style="margin-top:6px">
+        ${['auto', 'ns', 'ew', 'blink', 'off'].map((m) =>
+          `<button class="btn-mini${l.mode === m ? ' active' : ''}" data-mode="${m}" onclick="setLight('${l.id}','${m}')">${m}</button>`).join('')}
+      </div>`;
+  } else if (selected.type === 'cam') {
+    const c = state.cameras.find((x) => x.id === selected.id);
+    if (!c) { selected = null; return renderInspector(); }
+    box.innerHTML = `
+      <div class="title">🎥 ${c.id}</div>
+      <canvas id="feed" width="320" height="180"></canvas>
+      <div class="kv"><span>posição</span><b>(${c.x}, ${c.y})</b></div>
+      <div class="kv"><span>status</span><b style="color:${c.online ? 'var(--green)' : 'var(--red)'}">${c.online ? 'ONLINE' : 'OFFLINE'}${c.recording ? ' · REC' : ''}</b></div>
+      <div class="kv"><span>detecções</span><b id="ins-det">${c.detections}</b></div>
+      <div class="kv"><span>pan</span><b id="ins-pan">${c.pan}°</b></div>
+      <div class="kv"><span>zoom</span><b id="ins-zoom">${c.zoom}x</b></div>
+      <label class="hint">pan</label>
+      <input type="range" min="-180" max="180" value="${c.pan}" ${c.online ? '' : 'disabled'}
+        oninput="document.getElementById('ins-pan').textContent=this.value+'°'"
+        onchange="camAction('${c.id}',{pan:+this.value})">
+      <label class="hint">zoom</label>
+      <input type="range" min="1" max="4" step="0.5" value="${c.zoom}" ${c.online ? '' : 'disabled'}
+        oninput="document.getElementById('ins-zoom').textContent=this.value+'x'"
+        onchange="camAction('${c.id}',{zoom:+this.value})">
+      <button class="btn-mini" ${c.online ? '' : 'disabled'} onclick="camAction('${c.id}',{recording:${!c.recording}})">${c.recording ? '■ Parar gravação' : '● Iniciar gravação'}</button>`;
+    startFeed(c);
+  } else {
+    const s = state.substations.find((x) => x.id === selected.id);
+    if (!s) { selected = null; return renderInspector(); }
+    box.innerHTML = `
+      <div class="title">⚡ ${s.id}</div>
+      <div class="kv"><span>zona</span><b>${s.zone}</b></div>
+      <div class="kv"><span>status</span><b style="color:${s.online ? 'var(--green)' : 'var(--red)'}">${s.online ? 'ONLINE' : 'OFFLINE'}</b></div>
+      <div class="kv"><span>carga</span><b id="ins-load">${s.online ? s.load.toFixed(0) + '%' : 'OFFLINE'}</b></div>
+      <button class="btn-mini${s.online ? ' danger' : ''}" style="margin-top:6px" onclick="subToggle('${s.id}', ${s.online ? 'false' : 'true'})">${s.online ? '⏻ Derrubar subestação' : '⏻ Restaurar subestação'}</button>`;
+  }
+}
+
+/* ================= feed procedural da câmera ================= */
+let feedAnim = 0;
+function stopFeed() {
+  if (feedAnim) { cancelAnimationFrame(feedAnim); feedAnim = 0; }
+}
+
+function startFeed(cam) {
+  stopFeed();
+  const fc = document.getElementById('feed');
+  if (!fc) return;
+  const f = fc.getContext('2d');
+  const W = fc.width, H = fc.height;
+  const noise = document.createElement('canvas');
+  noise.width = 80; noise.height = 45;
+  const nf = noise.getContext('2d');
+  const img = nf.createImageData(80, 45);
+  const detect = { x: Math.random() * 0.7 + 0.1, y: Math.random() * 0.5 + 0.25, w: 0.14, t: 0 };
+
+  function frame(ts) {
+    const live = state && state.cameras.find((c) => c.id === cam.id);
+    if (!fc.isConnected || !live) { feedAnim = 0; return; }
+    feedAnim = requestAnimationFrame(frame);
+
+    // fundo procedural: cena de rua estilizada
+    const night = state.night;
+    f.fillStyle = night ? '#0a0f16' : '#131b24';
+    f.fillRect(0, 0, W, H);
+
+    // prédios
+    f.fillStyle = night ? '#0e1620' : '#1a2531';
+    for (let i = 0; i < 7; i++) {
+      const bw = W / 7;
+      const bh = 40 + ((i * 37 + cam.x * 13) % 50);
+      f.fillRect(i * bw + 2, H * 0.45 - bh, bw - 4, bh);
+      // janelas
+      f.fillStyle = night ? (i % 2 ? '#2a3345' : '#1c2434') : '#26313f';
+      for (let wy = 0; wy < 3; wy++) for (let wx = 0; wx < 3; wx++) {
+        if ((i + wx + wy + cam.x) % 3 === 0) f.fillRect(i * bw + 8 + wx * 10, H * 0.45 - bh + 8 + wy * 12, 5, 7);
+      }
+      f.fillStyle = night ? '#0e1620' : '#1a2531';
+    }
+    // rua
+    f.fillStyle = night ? '#0c1219' : '#161f29';
+    f.fillRect(0, H * 0.45, W, H * 0.55);
+    f.strokeStyle = 'rgba(200,220,140,.35)';
+    f.setLineDash([12, 10]);
+    f.lineDashOffset = -ts / 40;
+    f.beginPath(); f.moveTo(0, H * 0.72); f.lineTo(W, H * 0.72); f.stroke();
+    f.setLineDash([]);
+
+    // carro passando
+    const carU = ((ts / (2600 - live.zoom * 300)) + cam.pan / 360) % 1.3;
+    if (carU < 1) {
+      f.fillStyle = live.online ? '#2f4a63' : '#1a2530';
+      f.fillRect(carU * W - 26, H * 0.78, 44, 16);
+      f.fillStyle = '#ffcf5e';
+      f.fillRect(carU * W + 14, H * 0.78 + 9, 5, 4);
+    }
+
+    // zoom aplicado (escala sutil)
+    // ruído
+    if (live.online && live.recording) {
+      for (let i = 0; i < img.data.length; i += 4) {
+        const v = (Math.random() * 40) | 0;
+        img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+        img.data[i + 3] = 26;
+      }
+      nf.putImageData(img, 0, 0);
+      f.imageSmoothingEnabled = false;
+      f.drawImage(noise, 0, 0, W, H);
+      f.imageSmoothingEnabled = true;
+    }
+
+    if (!live.online) {
+      f.fillStyle = 'rgba(5,8,11,.82)';
+      f.fillRect(0, 0, W, H);
+      f.fillStyle = '#ff3b6b';
+      f.font = 'bold 16px Consolas';
+      f.textAlign = 'center';
+      f.fillText('SINAL PERDIDO', W / 2, H / 2);
+      f.font = '10px Consolas';
+      f.fillStyle = '#55707f';
+      f.fillText('último frame há --', W / 2, H / 2 + 18);
+      f.textAlign = 'left';
+      return;
+    }
+
+    // caixa de detecção animada
+    detect.t += 0.016;
+    detect.x += Math.sin(detect.t) * 0.0015;
+    if (live.detections > 0) {
+      f.strokeStyle = '#2bff88';
+      f.lineWidth = 1.5;
+      const dx = detect.x * W, dy = detect.y * H, dw = detect.w * W, dh = dw * 1.4;
+      f.strokeRect(dx, dy, dw, dh);
+      f.fillStyle = '#2bff88';
+      f.font = '9px Consolas';
+      f.fillText(`ALVO ${String(live.detections).padStart(3, '0')}`, dx, dy - 4);
+    }
+
+    // mira
+    f.strokeStyle = 'rgba(63,216,255,.5)';
+    f.lineWidth = 1;
+    f.beginPath();
+    f.moveTo(W / 2 - 10, H / 2); f.lineTo(W / 2 + 10, H / 2);
+    f.moveTo(W / 2, H / 2 - 10); f.lineTo(W / 2, H / 2 + 10);
+    f.stroke();
+    f.strokeRect(6, 6, W - 12, H - 12);
+
+    // overlays
+    f.fillStyle = live.recording ? '#ff3b6b' : '#55707f';
+    f.beginPath(); f.arc(16, 16, 4, 0, Math.PI * 2); f.fill();
+    f.font = '10px Consolas';
+    f.fillStyle = '#9fd9ef';
+    f.fillText(`${cam.id}  ${live.recording ? '● REC' : '■ PAUSA'}`, 26, 20);
+    f.textAlign = 'right';
+    f.fillText(new Date().toLocaleString('pt-BR'), W - 12, 20);
+    f.fillText(`PAN ${live.pan}° Z${live.zoom}x`, W - 12, H - 10);
+    f.textAlign = 'left';
+
+    // scanlines
+    f.fillStyle = 'rgba(0,0,0,.16)';
+    for (let y = 0; y < H; y += 3) f.fillRect(0, y, W, 1);
+
+    // chuva
+    if (state.weather !== 'clear') {
+      f.strokeStyle = state.weather === 'storm' ? 'rgba(160,200,255,.5)' : 'rgba(160,200,255,.3)';
+      f.lineWidth = 1;
+      const n = state.weather === 'storm' ? 46 : 26;
+      for (let i = 0; i < n; i++) {
+        const rx = ((i * 73 + ts / (state.weather === 'storm' ? 3 : 6)) % (W + 40)) - 20;
+        const ry = ((i * 47 + ts / 2.2) % (H + 40)) - 20;
+        f.beginPath(); f.moveTo(rx, ry); f.lineTo(rx - 4, ry + 12); f.stroke();
+      }
+      if (state.weather === 'storm' && Math.random() < 0.008) {
+        f.fillStyle = 'rgba(220,240,255,.55)';
+        f.fillRect(0, 0, W, H);
+      }
+    }
+  }
+  feedAnim = requestAnimationFrame(frame);
+}
+
+/* ================= interação com o mapa =================
+   geometria cacheada — sem getBoundingClientRect por frame */
+let _rect = { left: 0, top: 0, width: 0, height: 0 };
+function refreshRect() {
+  const r = canvas.getBoundingClientRect();
+  _rect = { left: r.left, top: r.top, width: r.width, height: r.height };
+}
+refreshRect();
+if (typeof ResizeObserver !== 'undefined') {
+  new ResizeObserver(() => { refreshRect(); layerDirty = true; }).observe(canvas);
+} else {
+  window.addEventListener('resize', () => { refreshRect(); layerDirty = true; });
+}
+
+function geom() {
+  const rect = _rect;
+  const pad = 46;
+  const cols = state ? state.grid.cols : 8;
+  const rows = state ? state.grid.rows : 6;
+  const cw = (rect.width - pad * 2) / (cols - 1);
+  const ch = (rect.height - pad * 2) / (rows - 1);
+  return {
+    rect, pad, cw, ch,
+    px: (c) => pad + c * cw,
+    py: (r) => pad + r * ch,
+  };
+}
+
+function subCenter(s, g) {
+  const west = s.zone === 'noroeste' || s.zone === 'sudoeste';
+  const north = s.zone === 'noroeste' || s.zone === 'nordeste';
+  return { x: g.rect.width * (west ? 0.27 : 0.73), y: g.rect.height * (north ? 0.27 : 0.73) };
+}
+
+function hitTest(e) {
+  if (!state) return null;
+  const g = geom();
+  const x = e.clientX - g.rect.left, y = e.clientY - g.rect.top;
+
+  // semáforos primeiro (raio apertado) — ficam "por cima" nas zonas disputadas
+  let best = null, dBest = 14;
+  for (const l of state.lights) {
+    const d = Math.hypot(g.px(l.x) - x, g.py(l.y) - y);
+    if (d < dBest) { dBest = d; best = l; }
+  }
+  if (best) return { type: 'light', id: best.id };
+
+  // câmeras (ícone deslocado 16px para cima)
+  let bestCam = null; dBest = 14;
+  for (const c of state.cameras) {
+    const d = Math.hypot(g.px(c.x) - x, g.py(c.y) - 16 - y);
+    if (d < dBest) { dBest = d; bestCam = c; }
+  }
+  if (bestCam) return { type: 'cam', id: bestCam.id };
+
+  // subestações (caixa)
+  for (const s of state.substations) {
+    const c = subCenter(s, g);
+    if (Math.abs(x - c.x) < 64 && Math.abs(y - c.y) < 34) return { type: 'sub', id: s.id };
+  }
+  return null;
+}
+
+const tooltip = document.getElementById('tooltip');
+
+function tooltipHtml(hit) {
+  if (!hit || !state) return '';
+  if (hit.type === 'light') {
+    const l = state.lights.find((x) => x.id === hit.id);
+    if (!l) return '';
+    const st = l.powered ? (l.yellow ? 'AMARELO' : l.state.toUpperCase()) : 'SEM ENERGIA';
+    return `<b>${l.id}</b> <span class="dim">(${l.x},${l.y})</span><br>
+      estado: ${st} · modo: ${l.mode}<br>
+      <span class="dim">clique para controlar</span>`;
+  }
+  if (hit.type === 'cam') {
+    const c = state.cameras.find((x) => x.id === hit.id);
+    if (!c) return '';
+    return `<b>${c.id}</b> <span class="dim">(${c.x},${c.y})</span><br>
+      ${c.online ? `online · ${c.detections} detecções` : '<span style="color:var(--red)">OFFLINE</span>'}<br>
+      <span class="dim">pan ${c.pan}° · zoom ${c.zoom}x</span>`;
+  }
+  const s = state.substations.find((x) => x.id === hit.id);
+  if (!s) return '';
+  return `<b>⚡ ${s.id}</b> <span class="dim">${s.zone}</span><br>
+    ${s.online ? `carga ${s.load.toFixed(0)}%` : '<span style="color:var(--red)">OFFLINE</span>'}<br>
+    <span class="dim">clique para gerenciar</span>`;
+}
+
+canvas.addEventListener('mousemove', (e) => {
+  const hit = hitTest(e);
+  canvas.style.cursor = hit ? 'pointer' : 'default';
+  if (hit) {
+    const html = tooltipHtml(hit);
+    if (html) {
+      tooltip.innerHTML = html;
+      tooltip.style.display = 'block';
+      const pad = 14;
+      let tx = e.clientX + pad, ty = e.clientY + pad;
+      const r = tooltip.getBoundingClientRect();
+      if (tx + r.width > window.innerWidth - 8) tx = e.clientX - r.width - pad;
+      if (ty + r.height > window.innerHeight - 8) ty = e.clientY - r.height - pad;
+      tooltip.style.left = tx + 'px';
+      tooltip.style.top = ty + 'px';
+      return;
+    }
+  }
+  tooltip.style.display = 'none';
+});
+
+canvas.addEventListener('mouseleave', () => { tooltip.style.display = 'none'; });
+
+canvas.addEventListener('click', (e) => {
+  const hit = hitTest(e);
+  if (hit) {
+    const wasSel = selected && selected.id === hit.id;
+    selected = hit;
+    inspectorDirty = true;
+    renderInspector();
+    if (!wasSel && hit.type === 'light') addLine('control', `selecionado ${hit.id}`);
+  } else {
+    selected = null;
+    inspectorDirty = true;
+    renderInspector();
+  }
+});
+
+window.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  const map = {
+    '1': () => lightsAll('auto'),
+    '2': () => lightsAll('ns'),
+    '3': () => lightsAll('ew'),
+    '4': () => lightsAll('blink'),
+    '5': () => lightsAll('off'),
+    'q': () => togglePanel('left'),
+    'e': () => togglePanel('right'),
+    't': () => togglePanel('term'),
+    'F1': () => event('blackout'),
+    'F2': () => event('hack'),
+    'F3': () => event('attacker'),
+    'F4': () => event('restore'),
+  };
+  if (e.key === 'Escape') {
+    if (selected) { selected = null; inspectorDirty = true; renderInspector(); }
+    return;
+  }
+  const fn = map[e.key.length === 1 ? e.key.toLowerCase() : e.key];
+  if (fn) {
+    e.preventDefault();
+    fn();
+  }
+});
+
+/* ================= render em camadas =================
+   camada "layer": tudo que muda 1Hz (fundo, quadras, ruas, prédios)
+   camada principal: 60fps, só elementos animados (carros, luzes, cones) */
+const layer = document.createElement('canvas');
+const lctx = layer.getContext('2d');
+let layerDirty = true;
+let roadGeom = [];
+
+function hashId(id) { let h = 0; for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0; return (h % 1000) / 1000; }
+
+function loadColor(load) {
+  if (load < 45) return '43,255,136';
+  if (load < 70) return '255,176,32';
+  return '255,59,107';
+}
+
+// sprites de glow pré-renderizados (muito mais baratos que shadowBlur)
+const glowCache = {};
+function glow(rgb) {
+  if (glowCache[rgb]) return glowCache[rgb];
+  const s = document.createElement('canvas');
+  s.width = s.height = 32;
+  const c = s.getContext('2d');
+  const g = c.createRadialGradient(16, 16, 0, 16, 16, 16);
+  g.addColorStop(0, `rgba(${rgb},.85)`);
+  g.addColorStop(0.35, `rgba(${rgb},.3)`);
+  g.addColorStop(1, `rgba(${rgb},0)`);
+  c.fillStyle = g;
+  c.fillRect(0, 0, 32, 32);
+  return (glowCache[rgb] = s);
+}
+
+function bakeLayer(W, H, dpr) {
+  const g = geom();
+  const s = state;
+  if (layer.width !== Math.round(W * dpr) || layer.height !== Math.round(H * dpr)) {
+    layer.width = Math.round(W * dpr);
+    layer.height = Math.round(H * dpr);
+  }
+  lctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  // fundo
+  const bgGrad = lctx.createRadialGradient(W / 2, H / 2, 50, W / 2, H / 2, Math.max(W, H) * 0.75);
+  bgGrad.addColorStop(0, '#070c12');
+  bgGrad.addColorStop(1, '#04070b');
+  lctx.fillStyle = bgGrad;
+  lctx.fillRect(0, 0, W, H);
+
+  // quadras / prédios
+  for (let r = 0; r < s.grid.rows - 1; r++) {
+    for (let c = 0; c < s.grid.cols - 1; c++) {
+      const seed = (r * 7 + c * 13) % 5;
+      lctx.fillStyle = `rgba(12,18,26,${0.5 + seed * 0.08})`;
+      lctx.fillRect(g.px(c) + 5, g.py(r) + 5, g.cw - 10, g.ch - 10);
+      lctx.strokeStyle = 'rgba(30,45,60,.5)';
+      lctx.lineWidth = 1;
+      lctx.strokeRect(g.px(c) + 5, g.py(r) + 5, g.cw - 10, g.ch - 10);
+      // silhueta de prédio
+      if (seed % 2 === 0) {
+        lctx.fillStyle = 'rgba(20,30,42,.9)';
+        const bw = Math.max(14, g.cw * 0.28), bh = Math.max(12, g.ch * 0.3);
+        lctx.fillRect(g.px(c) + g.cw / 2 - bw / 2, g.py(r) + g.ch / 2 - bh / 2, bw, bh);
+        lctx.strokeStyle = 'rgba(40,60,80,.6)';
+        lctx.strokeRect(g.px(c) + g.cw / 2 - bw / 2, g.py(r) + g.ch / 2 - bh / 2, bw, bh);
+      }
+    }
+  }
+
+  // geometria das ruas para os carros (camada dinâmica)
+  roadGeom = s.roads.map((road) => {
+    const a = s.lights[road.a], b = s.lights[road.b];
+    const x1 = g.px(a.x), y1 = g.py(a.y), x2 = g.px(b.x), y2 = g.py(b.y);
+    const rgb = loadColor(road.load);
+    // leito da rua
+    lctx.strokeStyle = `rgba(${rgb},${0.14 + road.flow * 0.25})`;
+    lctx.lineWidth = 2 + (road.load / 100) * 6;
+    lctx.lineCap = 'round';
+    lctx.beginPath();
+    lctx.moveTo(x1, y1);
+    lctx.lineTo(x2, y2);
+    lctx.stroke();
+    return {
+      x1, y1, x2, y2, rgb,
+      hash: hashId(road.id),
+      speed: 0.12 + road.flow * 0.5,
+      show: road.load > 15,
+      load: road.load,
+    };
+  });
+
+  // zonas de subestação
+  for (const sub of s.substations) {
+    const c = subCenter(sub, g);
+    const col = sub.online ? '63,216,255' : '255,59,107';
+    lctx.setLineDash([7, 5]);
+    lctx.lineWidth = 1;
+    lctx.strokeStyle = `rgba(${col},.4)`;
+    lctx.fillStyle = `rgba(${col},.04)`;
+    lctx.beginPath();
+    lctx.roundRect(c.x - 64, c.y - 34, 128, 68, 6);
+    lctx.fill();
+    lctx.stroke();
+    lctx.setLineDash([]);
+    lctx.textAlign = 'center';
+    lctx.fillStyle = `rgba(${col},.9)`;
+    lctx.font = 'bold 13px Consolas';
+    lctx.fillText(sub.id, c.x, c.y - 8);
+    lctx.font = '10px Consolas';
+    lctx.fillStyle = '#55707f';
+    lctx.fillText(sub.online ? `carga ${sub.load.toFixed(0)}%` : 'OFFLINE', c.x, c.y + 9);
+    if (sub.online) {
+      lctx.fillStyle = '#101922';
+      lctx.fillRect(c.x - 45, c.y + 16, 90, 5);
+      lctx.fillStyle = sub.load > 85 ? '#ff3b6b' : sub.load > 65 ? '#ffb020' : '#2bff88';
+      lctx.fillRect(c.x - 45, c.y + 16, 90 * (sub.load / 100), 5);
+    }
+    lctx.textAlign = 'left';
+  }
+
+  // corpos das câmeras + rótulos
+  for (const cam of s.cameras) {
+    const x = g.px(cam.x), y = g.py(cam.y) - 16;
+    lctx.fillStyle = cam.online ? '#2bff88' : '#ff3b6b';
+    lctx.beginPath();
+    lctx.arc(x, y, 4, 0, Math.PI * 2);
+    lctx.fill();
+    lctx.font = '9px Consolas';
+    lctx.fillText(cam.id, x + 7, y + 3);
+  }
+
+  // anéis base dos semáforos
+  for (const l of s.lights) {
+    const x = g.px(l.x), y = g.py(l.y);
+    lctx.beginPath();
+    lctx.arc(x, y, 3.5, 0, Math.PI * 2);
+    lctx.fillStyle = l.powered ? '#0a0f14' : '#0d0709';
+    lctx.fill();
+    lctx.strokeStyle = l.powered ? 'rgba(180,210,230,.7)' : 'rgba(120,60,70,.5)';
+    lctx.lineWidth = 1;
+    lctx.stroke();
+  }
+
+  layerDirty = false;
+}
+
+function draw(ts) {
+  requestAnimationFrame(draw);
+  if (!state) return;
+
+  const dpr = window.devicePixelRatio || 1;
+  const g = geom();
+  const W = g.rect.width, H = g.rect.height;
+  if (W < 60 || H < 60) return;
+  if (canvas.width !== Math.round(W * dpr) || canvas.height !== Math.round(H * dpr)) {
+    canvas.width = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+    layerDirty = true;
+  }
+  if (layerDirty) bakeLayer(W, H, dpr);
+
+  const t = ts / 1000;
+  const s = state;
+
+  // compõe camada estática
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.drawImage(layer, 0, 0);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  // carros (sprite de glow, sem shadowBlur)
+  for (const r of roadGeom) {
+    if (!r.show) continue;
+    const u1 = (r.hash + t * r.speed * 0.35) % 1;
+    const u2 = (r.hash + 0.5 + t * r.speed * 0.3) % 1;
+    const sprite = glow(r.rgb);
+    for (const u of [u1, u2]) {
+      const cx = r.x1 + (r.x2 - r.x1) * u;
+      const cy = r.y1 + (r.y2 - r.y1) * u;
+      ctx.drawImage(sprite, cx - 7, cy - 7, 14, 14);
+      ctx.fillStyle = `rgba(${r.rgb},.95)`;
+      ctx.fillRect(cx - 1, cy - 1, 2, 2);
+    }
+  }
+
+  // cones de câmera
+  for (const cam of s.cameras) {
+    if (!cam.online || !cam.recording) continue;
+    const x = g.px(cam.x), y = g.py(cam.y) - 16;
+    const ang = (cam.pan * Math.PI) / 180;
+    const rad = 42 * cam.zoom + Math.sin(t * 2) * 3;
+    const grad = ctx.createRadialGradient(x, y, 4, x, y, rad);
+    grad.addColorStop(0, 'rgba(63,216,255,.28)');
+    grad.addColorStop(1, 'rgba(63,216,255,0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.arc(x, y, rad, ang - 0.42, ang + 0.42);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(63,216,255,.35)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    if (selected && selected.type === 'cam' && selected.id === cam.id) {
+      ctx.strokeStyle = 'rgba(255,255,255,.85)';
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath(); ctx.arc(x, y, 10 + Math.sin(t * 5) * 2, 0, Math.PI * 2); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+
+  // semáforos
+  for (const l of s.lights) {
+    const x = g.px(l.x), y = g.py(l.y);
+    const isSel = selected && selected.type === 'light' && selected.id === l.id;
+
+    if (!l.powered) {
+      ctx.strokeStyle = '#241016';
+      ctx.lineWidth = 3;
+      ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(x, y - 7); ctx.lineTo(x, y + 7); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x - 7, y); ctx.lineTo(x + 7, y); ctx.stroke();
+    } else {
+      const blinkOn = l.mode === 'blink' && Math.floor(t * 2) % 2 === 0;
+      const nsActive = l.mode === 'blink' ? blinkOn : l.state === 'ns';
+      const ewActive = l.mode === 'blink' ? !blinkOn : l.state === 'ew';
+      const rgb = l.yellow ? '255,176,32' : (l.state === 'ns' ? '63,216,255' : '255,59,107');
+      ctx.lineWidth = 3;
+      ctx.lineCap = 'round';
+      if (nsActive) {
+        ctx.drawImage(glow(rgb), x - 11, y - 14, 22, 28);
+        ctx.strokeStyle = `rgba(${rgb},1)`;
+        ctx.beginPath(); ctx.moveTo(x, y - 7); ctx.lineTo(x, y + 7); ctx.stroke();
+      } else {
+        ctx.strokeStyle = '#1a2530';
+        ctx.beginPath(); ctx.moveTo(x, y - 7); ctx.lineTo(x, y + 7); ctx.stroke();
+      }
+      if (ewActive) {
+        ctx.drawImage(glow(rgb), x - 14, y - 11, 28, 22);
+        ctx.strokeStyle = `rgba(${rgb},1)`;
+        ctx.beginPath(); ctx.moveTo(x - 7, y); ctx.lineTo(x + 7, y); ctx.stroke();
+      } else {
+        ctx.strokeStyle = '#1a2530';
+        ctx.beginPath(); ctx.moveTo(x - 7, y); ctx.lineTo(x + 7, y); ctx.stroke();
+      }
+    }
+
+    if (isSel) {
+      ctx.strokeStyle = 'rgba(255,255,255,.9)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 4]);
+      ctx.lineDashOffset = -t * 20;
+      ctx.beginPath(); ctx.arc(x, y, 13 + Math.sin(t * 4) * 2, 0, Math.PI * 2); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.lineDashOffset = 0;
+    }
+  }
+
+  // camada climática/noturna
+  if (s.night) {
+    ctx.fillStyle = 'rgba(8,14,40,.30)';
+    ctx.fillRect(0, 0, W, H);
+  }
+  if (s.weather !== 'clear') {
+    const storm = s.weather === 'storm';
+    ctx.strokeStyle = storm ? 'rgba(170,205,255,.42)' : 'rgba(170,205,255,.26)';
+    ctx.lineWidth = 1;
+    const n = storm ? 70 : 40;
+    for (let i = 0; i < n; i++) {
+      const rx = ((i * 97 + ts / (storm ? 2.4 : 4.5)) % (W + 60)) - 30;
+      const ry = ((i * 61 + ts / 1.6) % (H + 60)) - 30;
+      ctx.beginPath();
+      ctx.moveTo(rx, ry);
+      ctx.lineTo(rx - 5, ry + 14);
+      ctx.stroke();
+    }
+    if (storm) {
+      // relâmpago ocasional
+      if (Math.sin(ts / 900) > 0.996) {
+        ctx.fillStyle = 'rgba(225,240,255,.30)';
+        ctx.fillRect(0, 0, W, H);
+      }
+      ctx.fillStyle = 'rgba(10,16,30,.14)';
+      ctx.fillRect(0, 0, W, H);
+    }
+  }
+
+  // banner de intrusão
+  if (s.controlled) {
+    ctx.fillStyle = `rgba(255,59,107,${0.03 + Math.sin(t * 8) * 0.02})`;
+    ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = `rgba(255,59,107,${0.4 + Math.sin(t * 8) * 0.3})`;
+    ctx.lineWidth = 3;
+    ctx.strokeRect(2, 2, W - 4, H - 4);
+  }
+
+  // FPS
+  frames++;
+  if (ts - fpsLast > 500) {
+    fps = Math.round((frames * 1000) / (ts - fpsLast));
+    frames = 0;
+    fpsLast = ts;
+    fpsEl.textContent = `${fps} FPS`;
+    fpsEl.style.color = fps < 40 ? 'var(--red)' : fps < 55 ? 'var(--amber)' : 'var(--dim)';
+  }
+}
+
+let frames = 0, fpsLast = 0, fps = 0;
+const fpsEl = document.getElementById('fps');
+requestAnimationFrame(draw);
+
+addLine('system', 'iniciando ctOS…');
+</script>
+</body>
+</html>

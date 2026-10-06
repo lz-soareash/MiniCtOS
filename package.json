@@ -1,0 +1,10 @@
+{
+  "name": "ctos",
+  "version": "0.1.0",
+  "description": "mini ctOS - simulação de sistema operacional urbano centralizado",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "license": "MIT"
+}
